@@ -111,14 +111,14 @@ def models_endpoint_for(base_url: str) -> str:
     return base_url.rstrip("/").removesuffix("/messages") + "/models"
 
 
-def fetch_model_ids(endpoint: str) -> list[str]:
-    """GET the v1/models endpoint with curl User-Agent + x-opencode-session; [] + warning on failure."""
+def fetch_model_ids(endpoint: str, api_key: str | None = None) -> list[str]:
+    """GET the v1/models endpoint with curl User-Agent, x-opencode-session, and optional Authorization; [] + warning on failure."""
     try:
         session_id = os.urandom(16).hex()
-        request = urllib.request.Request(
-            endpoint,
-            headers={"x-opencode-session": session_id, "User-Agent": "curl/8.5.0"},
-        )
+        headers = {"x-opencode-session": session_id, "User-Agent": "curl/8.5.0"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        request = urllib.request.Request(endpoint, headers=headers)
         with urllib.request.urlopen(request, timeout=30) as response:
             return parse_go_model_ids(response.read().decode())
     except Exception as e:
@@ -134,12 +134,14 @@ def discover_models() -> tuple[list[str], dict[str, list[str]]]:
     free_models = parse_free_models(output)
     base_urls = load_provider_base_urls()
     provider_models = {}
-    for provider, _ in PROVIDERS:
+    for provider, key_env in PROVIDERS:
         base_url = base_urls.get(provider)
         if not base_url:
             print(f"warning: no baseURL configured for {provider}", file=sys.stderr)
             continue
-        provider_models[provider] = fetch_model_ids(models_endpoint_for(base_url))
+        provider_models[provider] = fetch_model_ids(
+            models_endpoint_for(base_url), os.environ.get(key_env)
+        )
     return free_models, provider_models
 
 

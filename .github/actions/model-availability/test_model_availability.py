@@ -23,6 +23,7 @@ def fake_run(args, *a, **kw):
 class TestDiscoverModels:
     def test_discovers_models_per_provider(self, monkeypatch):
         captured = {}
+        monkeypatch.setenv("VSHN_US_AI_API_KEY", "test-key")
 
         class FakeResponse:
             def __enter__(self):
@@ -47,6 +48,7 @@ class TestDiscoverModels:
             "vshn-us-ai": ["glm-5.2"],
         }
         assert captured["headers"]["User-agent"] == "curl/8.5.0"
+        assert captured["headers"].get("Authorization") == "Bearer test-key"
         assert not any("Python-urllib" in v for v in captured["headers"].values())
         assert any(k.lower() == "x-opencode-session" for k in captured["headers"])
         assert captured["full_url"].endswith("/models")
