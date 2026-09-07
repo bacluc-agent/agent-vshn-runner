@@ -1,0 +1,149 @@
+name: Review fixes runner
+
+on:
+  schedule:
+    - cron: "32 */4 * * *" # Every 4 hours at :32
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: >-
+          Optional override prompt for all PRs (leave empty for
+          auto-generation).
+        required: false
+        type: string
+      model:
+        description: Optional OpenCode model override (e.g. vshn-us-ai/subscription.glm-5.2)
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  artifact-metadata: write
+  checks: read
+  packages: write
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Find all open PRs with review comments from @Bacluc or @bacluc-agent
+  # ---------------------------------------------------------------------------
+  find-prs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      prs: ${{ steps.find.outputs.prs }}
+      count: ${{ steps.find.outputs.count }}
+      pr_metadata: ${{ steps.find.outputs.pr_metadata }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
+      ISSUE_REPOSITORY: ${{ vars.ISSUE_REPOSITORY || github.repository }}
+    steps:
+      - name: Check out target repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ vars.ISSUE_REPOSITORY || github.repository }}
+          fetch-depth: 0
+          token: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
+
+      - name: Find PRs with review comments
+        id: find
+        shell: bash
+        env:
+          OVERRIDE_PROMPT: ${{ inputs.prompt }}
+        run: |
+          set -Eeuo pipefail
+          printf '::add-mask::%s\n' "$GITHUB_TOKEN"
+
+          prs_file="$RUNNER_TEMP/prs.json"
+          : > "$prs_file"
+
+          declare -A seen
+
+          while IFS= read -r pr; do
+            [[ -n "$pr" ]] || continue
+            seen[$pr]=1
+          done < <(
+            gh api --paginate \
+              "search/issues?q=repo:${ISSUE_REPOSITORY}+is:pr+is:open+reviewed-by:Bacluc&per_page=100" \
+              --jq '.items[].number' 2>/dev/null || true
+          )
+
+          while IFS= read -r pr; do
+            [[ -n "$pr" ]] || continue
+            seen[$pr]=1
+          done < <(
+            gh api --paginate \
+              "search/issues?q=repo:${ISSUE_REPOSITORY}+is:pr+is:open+reviewed-by:bacluc-agent&per_page=100" \
+              --jq '.items[].number' 2>/dev/null || true
+          )
+
+          mapfile -t unique_prs < <(printf '%s\n' "${!seen[@]}" | sort -n)
+
+          if [[ ${#unique_prs[@]} -eq 0 || -z "${unique_prs[0]}" ]]; then
+            printf '%s\n' 'No open PRs with review comments found.'
+            {
+              echo "prs<<PRS_EOF"
+              echo "[]"
+              echo "PRS_EOF"
+              echo "count=0"
+              echo "pr_metadata<<META_EOF"
+              echo "{}"
+              echo "META_EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          printf '%s\n' "${unique_prs[@]}" | jq -R . | jq -s . > "$prs_file"
+
+          printf 'Found %d open PR(s) with review comments: %s\n' \
+            "${#unique_prs[@]}" "${unique_prs[*]}"
+
+          pr_metadata="{}"
+          for pr_number in "${unique_prs[@]}"; do
+            pr_info=$(gh pr view "$pr_number" -R "$ISSUE_REPOSITORY" --json number,title,headRefName,url)
+            if [[ -n "${OVERRIDE_PROMPT:-}" ]]; then
+              prompt="$OVERRIDE_PROMPT"
+            else
+              title=$(jq -r '.title' <<<"$pr_info")
+              head_ref=$(jq -r '.headRefName' <<<"$pr_info")
+              url=$(jq -r '.url' <<<"$pr_info")
+              prompt=$(printf '%s\n' \
+                "PR #${pr_number}: ${title}" \
+                "Branch: ${head_ref}" \
+                "URL: ${url}" \
+                "" \
+                "Apply the review comments for this PR. Check the PR review comments," \
+                "implement the requested changes, push to the PR branch, and verify" \
+                "the changes work. Update the corresponding issue with progress.")
+            fi
+            pr_info=$(jq --arg prompt "$prompt" '. + {prompt: $prompt}' <<<"$pr_info")
+            pr_metadata=$(jq --argjson pr "$pr_info" '. + {($pr.number | tostring): $pr}' <<<"$pr_metadata")
+          done
+
+          {
+            echo "prs<<PRS_EOF"
+            cat "$prs_file"
+            echo "PRS_EOF"
+            echo "count=${#unique_prs[@]}"
+            echo "pr_metadata<<META_EOF"
+            echo "$pr_metadata"
+            echo "META_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Process each PR — dispatch to opencode workflow (matrix)
+  # ---------------------------------------------------------------------------
+  process-prs:
+    needs: find-prs
+    if: needs.find-prs.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ${{ fromJson(needs.find-prs.outputs.prs) }}
+    uses: ./.github/workflows/opencode.yml
+    with:
+      prompt: ${{ fromJson(needs.find-prs.outputs.pr_metadata)[matrix.pr].prompt }}
+      model: ${{ inputs.model }}
+    secrets: inherit

@@ -1,0 +1,31 @@
+name: Check model availability
+description: >-
+  Probes every model of the vshn-us-ai provider (plus free models) for
+  availability and merges the results into the model-availability cache
+  issue in the issue repository. The cache issue number is taken from the
+  MODEL_AVAILABILITY_CACHE_ISSUE env var, or auto-detected by searching for
+  an issue titled "model-discovery cache". Available models cache for 24
+  hours, failed models for 2 hours. Relies on the job-level VSHN_US_AI_API_KEY
+  and ISSUE_REPOSITORY env vars set by the caller.
+outputs:
+  cache-json:
+    description: Merged cache JSON (current cache plus fresh probe results)
+    value: ${{ steps.check.outputs.cache-json }}
+  available-models:
+    description: >-
+      Newline-separated model IDs with ok=true in the merged cache, free
+      models first, then vshn-us-ai models
+    value: ${{ steps.check.outputs.available-models }}
+  cache-issue:
+    description: Resolved model-availability cache issue number (empty when none)
+    value: ${{ steps.check.outputs.cache-issue }}
+runs:
+  using: composite
+  steps:
+    - name: Check model availability
+      id: check
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        printf '::add-mask::%s\n' "${VSHN_US_AI_API_KEY:-}"
+        python3 "${{ github.action_path }}/model_availability.py"

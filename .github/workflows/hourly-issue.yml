@@ -1,0 +1,167 @@
+name: Hourly issue runner
+
+on:
+  schedule:
+    - cron: "24 * * * *"
+  workflow_dispatch:
+    inputs:
+      selection_prompt:
+        description: Optional override for the selection instruction tail (the candidate list is always prepended)
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  artifact-metadata: write
+  checks: read
+  packages: write
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  select:
+    # ponytail: the agent-running claim label is never removed by these workflows, so issues that
+    # fail, or succeed without closing, are permanently retired from selection; upgrade path is
+    # unlabeling on completion/failure or timeout-based claims.
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      prompt: ${{ steps.pick.outputs.prompt }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
+      VSHN_US_AI_API_KEY: ${{ secrets.VSHN_US_AI_API_KEY }}
+      ISSUE_REPOSITORY: ${{ vars.ISSUE_REPOSITORY || github.repository }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ vars.ISSUE_REPOSITORY || github.repository }}
+          token: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
+
+      - name: Set up OpenCode
+        uses: bacluc-agent/agent-vshn-runner/.github/actions/setup-opencode@main
+
+      - name: Check model availability
+        id: model-availability
+        uses: bacluc-agent/agent-vshn-runner/.github/actions/model-availability@main
+
+      - name: Pick issue and dispatch
+        id: pick
+        shell: bash
+        env:
+          SELECTION_PROMPT: ${{ inputs.selection_prompt }}
+          AVAILABLE_MODELS: ${{ steps.model-availability.outputs.available-models }}
+        run: |
+          set -Eeuo pipefail
+
+          printf '::add-mask::%s\n' "$GITHUB_TOKEN"
+          printf '::add-mask::%s\n' "$VSHN_US_AI_API_KEY"
+
+          gh label create agent-running -R "$ISSUE_REPOSITORY" \
+            --color 0E8A16 --description 'Selected by the hourly issue runner' --force
+
+          printf '\n\n\n\n\n\n'
+          printf 'Fetching github issues...\n'
+          printf '\n\n\n\n\n\n'
+
+          # gh issue list -S returns nothing for no:label:<name> (gh client filter); the search API works.
+          # Oldest-first: the 50-item page keeps the OLDEST 50 unclaimed issues instead of the
+          # newest 50, so backlog items beyond the cap are the newest, not the oldest.
+          search_json="$RUNNER_TEMP/candidates.json"
+          gh api "search/issues?q=repo:${ISSUE_REPOSITORY}+is:open+is:issue+no:label:agent-running+sort:created-asc&per_page=50" \
+            --jq '.items' > "$search_json"
+
+          candidates="$RUNNER_TEMP/candidate-numbers.txt"
+          jq -r '.[].number | tostring' "$search_json" > "$candidates"
+          if [[ ! -s "$candidates" ]]; then
+            printf '%s\n' 'No unclaimed open issues; nothing to do.'
+            exit 0
+          fi
+          printf 'Unclaimed candidate issues (oldest first):\n'
+          cat "$candidates"
+          printf '\n\n\n\n\n\n'
+          printf 'Selecting model...\n'
+          printf '\n\n\n\n\n\n'
+
+          selection_model=''
+          if [[ -n "$AVAILABLE_MODELS" ]]; then
+            selection_model="$(printf '%s\n' "$AVAILABLE_MODELS" | awk 'NF { print; exit }')"
+          fi
+          if [[ -z "$selection_model" ]]; then
+            printf '%s\n' 'No issue-selection model is available; not dispatching.' >&2
+            exit 1
+          fi
+          printf 'Issue selection model: %s\n' "$selection_model"
+          printf '\n\n\n\n\n\n'
+          printf 'Choosing issue...\n'
+          printf '\n\n\n\n\n\n'
+
+          default_tail="$(cat scripts/issue-selection-tail.txt)"
+          tail_instruction="${SELECTION_PROMPT:-$default_tail}"
+
+          prompt="$RUNNER_TEMP/selection-prompt.txt"
+          {
+            printf '%s\n' 'Open issue candidates in this repository (number: title, oldest first):'
+            jq -r '.[] | "\(.number): \(.title)"' "$search_json"
+            printf '%s\n' "$tail_instruction"
+          } > "$prompt"
+
+          selection="$RUNNER_TEMP/selection.out"
+          set +e
+          timeout 10m opencode run --agent issue-selector --model "$selection_model" --title "issue-selector" "$(< "$prompt")" 2> >(tee "${selection}.stderr" >&2) | tee "$selection"
+          selection_statuses=("${PIPESTATUS[@]}")
+          selection_status=${selection_statuses[0]}
+          selection_tee_status=${selection_statuses[1]}
+          set -e
+          printf 'Model selection statuses: opencode=%s tee=%s\n' "$selection_status" "$selection_tee_status"
+          if (( selection_tee_status != 0 )); then
+            exit "$selection_tee_status"
+          fi
+          if (( selection_status != 0 )); then
+            printf 'Selection failed (opencode=%s); not dispatching.\n' "$selection_status" >&2
+            exit 1
+          fi
+          if ! grep -q '[^[:space:]]' "$selection"; then
+            printf '%s\n' 'Selection produced no output; not dispatching.' >&2
+            exit 1
+          fi
+
+          eof="EOF_PROMPT_$(openssl rand -hex 32)"
+          if grep -Fqx -- "$eof" "$selection"; then
+            printf '%s\n' 'Selection output contained the output delimiter; not dispatching.' >&2
+            exit 1
+          fi
+          {
+            printf 'prompt<<%s\n' "$eof"
+            printf '%s\n' "$(< "$selection")"
+            printf '%s\n' "$eof"
+          } >> "$GITHUB_OUTPUT"
+
+          printf '%s\n' 'Implementation prompt:'
+          cat "$selection"
+
+      - name: Dump debug output
+        if: always()
+        shell: bash
+        env:
+          COORDINATOR_SESSION_TITLE: issue-selector
+        run: |
+          python3 scripts/dump_subagent_transcripts.py || true
+
+  run:
+    needs: select
+    if: needs.select.outputs.prompt != ''
+    permissions:
+      actions: write
+      artifact-metadata: write
+      checks: read
+      packages: write
+      contents: write
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/opencode.yml
+    with:
+      prompt: ${{ needs.select.outputs.prompt }}
+    secrets: inherit

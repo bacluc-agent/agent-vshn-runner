@@ -1,0 +1,18 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "minimumReleaseAge": "14 days",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/actions/setup-opencode/action\\.yml$/"
+      ],
+      "matchStrings": [
+        "npm install --global opencode-ai@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "opencode-ai"
+    }
+  ]
+}

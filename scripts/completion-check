@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+mount=(-v "$PWD:/workspace" -w /workspace)
+status=0
+
+check() {
+  local name="$1"
+  shift
+  printf '==> %s\n' "$name"
+  if "$@"; then
+    printf 'PASS: %s\n' "$name"
+  else
+    printf 'FAIL: %s\n' "$name" >&2
+    status=1
+  fi
+}
+
+check 'formatting (prettier --check .)' docker run --rm "${mount[@]}" ghcr.io/bacluc/prettier-image/prettier-image:3.9.4 --check .
+check 'actionlint (workflows + used actions)' docker run --rm "${mount[@]}" rhysd/actionlint:1.7.12 -color
+
+exit "$status"
