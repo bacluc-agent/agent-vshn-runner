@@ -31,7 +31,6 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
       VSHN_US_BASE_URL: ${{ secrets.VSHN_US_BASE_URL }}
-      VSHN_US_AI_BASE_URL: ${{ secrets.VSHN_US_AI_BASE_URL }}
       VSHN_US_AI_API_KEY: ${{ secrets.VSHN_US_AI_API_KEY }}
       ISSUE_REPOSITORY: ${{ vars.ISSUE_REPOSITORY || github.repository }}
       MODEL_AVAILABILITY_CACHE_ISSUE: ${{ vars.MODEL_AVAILABILITY_CACHE_ISSUE }}
