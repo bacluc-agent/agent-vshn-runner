@@ -50,6 +50,8 @@ jobs:
       VSHN_US_AI_API_KEY: ${{ secrets.VSHN_US_AI_API_KEY }}
       BACLUC_AGENT_GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
       ISSUE_REPOSITORY: ${{ vars.ISSUE_REPOSITORY || github.repository }}
+      MODEL_AVAILABILITY_CACHE_ISSUE: ${{ vars.MODEL_AVAILABILITY_CACHE_ISSUE }}
+      VSHN_US_AI_BASE_URL: ${{ vars.VSHN_US_AI_BASE_URL }}
 
     steps:
       - name: Print inputs

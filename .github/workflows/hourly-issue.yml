@@ -32,6 +32,8 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
       VSHN_US_AI_API_KEY: ${{ secrets.VSHN_US_AI_API_KEY }}
       ISSUE_REPOSITORY: ${{ vars.ISSUE_REPOSITORY || github.repository }}
+      MODEL_AVAILABILITY_CACHE_ISSUE: ${{ vars.MODEL_AVAILABILITY_CACHE_ISSUE }}
+      VSHN_US_AI_BASE_URL: ${{ vars.VSHN_US_AI_BASE_URL }}
 
     steps:
       - name: Check out repository
