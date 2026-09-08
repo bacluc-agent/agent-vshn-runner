@@ -59,29 +59,65 @@ jobs:
           prs_file="$RUNNER_TEMP/prs.json"
           : > "$prs_file"
 
-          declare -A seen
+          # Repos to scan for open PRs. The runner repo is where the agents
+          # open PRs; the issue repo is where issues live. Both may hold PRs.
+          repos_to_scan=("$ISSUE_REPOSITORY" "bacluc-agent/agent-vshn-runner")
+          # Deduplicate in case ISSUE_REPOSITORY == runner repo
+          unique_repos=()
+          declare -A repo_seen
+          for r in "${repos_to_scan[@]}"; do
+            if [[ -z "${repo_seen[$r]+_}" ]]; then
+              repo_seen[$r]=1
+              unique_repos+=("$r")
+            fi
+          done
 
-          while IFS= read -r pr; do
-            [[ -n "$pr" ]] || continue
-            seen[$pr]=1
-          done < <(
-            gh api --paginate \
-              "search/issues?q=repo:${ISSUE_REPOSITORY}+is:pr+is:open+reviewed-by:Bacluc&per_page=100" \
-              --jq '.items[].number' 2>/dev/null || true
-          )
+          # Reviewers whose feedback we act on
+          reviewers=("BacLuc" "bacluc-agent")
 
-          while IFS= read -r pr; do
-            [[ -n "$pr" ]] || continue
-            seen[$pr]=1
-          done < <(
-            gh api --paginate \
-              "search/issues?q=repo:${ISSUE_REPOSITORY}+is:pr+is:open+reviewed-by:bacluc-agent&per_page=100" \
-              --jq '.items[].number' 2>/dev/null || true
-          )
+          # Keyed by "repo/number" -> repo, deduplicated across repos
+          declare -A found
 
-          mapfile -t unique_prs < <(printf '%s\n' "${!seen[@]}" | sort -n)
+          for repo in "${unique_repos[@]}"; do
+            # Enumerate all open PRs in this repo (search index is unreliable
+            # for commenter:; enumerate and check comments directly instead).
+            while IFS= read -r pr_number; do
+              [[ -n "$pr_number" ]] || continue
 
-          if [[ ${#unique_prs[@]} -eq 0 || -z "${unique_prs[0]}" ]]; then
+              # Check issue comments, review comments, and formal reviews
+              # for any of the reviewers. Any of these counts as feedback.
+              has_feedback=false
+              for user in "${reviewers[@]}"; do
+                if gh api "repos/${repo}/issues/${pr_number}/comments?per_page=100" \
+                     --jq "[.[] | select(.user.login == \"${user}\")] | length" 2>/dev/null | grep -q '[1-9]'; then
+                  has_feedback=true
+                  break
+                fi
+                if gh api "repos/${repo}/pulls/${pr_number}/comments?per_page=100" \
+                     --jq "[.[] | select(.user.login == \"${user}\")] | length" 2>/dev/null | grep -q '[1-9]'; then
+                  has_feedback=true
+                  break
+                fi
+                if gh api "repos/${repo}/pulls/${pr_number}/reviews?per_page=100" \
+                     --jq "[.[] | select(.user.login == \"${user}\")] | length" 2>/dev/null | grep -q '[1-9]'; then
+                  has_feedback=true
+                  break
+                fi
+              done
+
+              if [[ "$has_feedback" == true ]]; then
+                found["${repo}/${pr_number}"]="$repo"
+              fi
+            done < <(
+              gh api --paginate "repos/${repo}/pulls?state=open&per_page=100" \
+                --jq '.[].number' 2>/dev/null || true
+            )
+          done
+
+          # Build sorted list of "repo/number" keys
+          mapfile -t unique_keys < <(printf '%s\n' "${!found[@]}" | sort -t/ -k3 -n)
+
+          if [[ ${#unique_keys[@]} -eq 0 || -z "${unique_keys[0]}" ]]; then
             printf '%s\n' 'No open PRs with review comments found.'
             {
               echo "prs<<PRS_EOF"
@@ -95,14 +131,19 @@ jobs:
             exit 0
           fi
 
-          printf '%s\n' "${unique_prs[@]}" | jq -R . | jq -s . > "$prs_file"
+          # Output PR identifiers as JSON array of "repo/number" strings
+          printf '%s\n' "${unique_keys[@]}" | jq -R . | jq -s . > "$prs_file"
 
-          printf 'Found %d open PR(s) with review comments: %s\n' \
-            "${#unique_prs[@]}" "${unique_prs[*]}"
+          printf 'Found %d open PR(s) with review comments:\n' "${#unique_keys[@]}"
+          for key in "${unique_keys[@]}"; do
+            printf '  %s\n' "$key"
+          done
 
           pr_metadata="{}"
-          for pr_number in "${unique_prs[@]}"; do
-            pr_info=$(gh pr view "$pr_number" -R "$ISSUE_REPOSITORY" --json number,title,headRefName,url)
+          for key in "${unique_keys[@]}"; do
+            pr_repo="${found[$key]}"
+            pr_number="${key##*/}"
+            pr_info=$(gh pr view "$pr_number" -R "$pr_repo" --json number,title,headRefName,url)
             if [[ -n "${OVERRIDE_PROMPT:-}" ]]; then
               prompt="$OVERRIDE_PROMPT"
             else
@@ -111,6 +152,7 @@ jobs:
               url=$(jq -r '.url' <<<"$pr_info")
               prompt=$(printf '%s\n' \
                 "PR #${pr_number}: ${title}" \
+                "Repository: ${pr_repo}" \
                 "Branch: ${head_ref}" \
                 "URL: ${url}" \
                 "" \
@@ -118,15 +160,17 @@ jobs:
                 "implement the requested changes, push to the PR branch, and verify" \
                 "the changes work. Update the corresponding issue with progress.")
             fi
-            pr_info=$(jq --arg prompt "$prompt" '. + {prompt: $prompt}' <<<"$pr_info")
-            pr_metadata=$(jq --argjson pr "$pr_info" '. + {($pr.number | tostring): $pr}' <<<"$pr_metadata")
+            pr_info=$(jq --arg prompt "$prompt" --arg repo "$pr_repo" \
+              '. + {prompt: $prompt, repository: $repo}' <<<"$pr_info")
+            pr_metadata=$(jq --argjson pr "$pr_info" --arg key "$key" \
+              '. + {($key): $pr}' <<<"$pr_metadata")
           done
 
           {
             echo "prs<<PRS_EOF"
             cat "$prs_file"
             echo "PRS_EOF"
-            echo "count=${#unique_prs[@]}"
+            echo "count=${#unique_keys[@]}"
             echo "pr_metadata<<META_EOF"
             echo "$pr_metadata"
             echo "META_EOF"
@@ -146,4 +190,5 @@ jobs:
     with:
       prompt: ${{ fromJson(needs.find-prs.outputs.pr_metadata)[matrix.pr].prompt }}
       model: ${{ inputs.model }}
+      repository: ${{ fromJson(needs.find-prs.outputs.pr_metadata)[matrix.pr].repository }}
     secrets: inherit
