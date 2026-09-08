@@ -100,8 +100,8 @@ The work is done by OpenCode agents defined in the OpenCode configuration pulled
 | `issue-selector`  | Picks the most valuable issue to work on next                 |
 | `model-discovery` | Chooses a reachable AI model for the current task             |
 | `coordinator`     | Delegates work to the other agents and keeps the run on track |
-| `refiner`         | Reviews and tightens the plan before code is written          |
 | `planner`         | Produces a step-by-step implementation plan                   |
+| `refiner`         | Reviews and tightens the plan before code is written          |
 | `build`           | Writes the code and tests                                     |
 | `tester`          | Runs tests and verifies the change works                      |
 | `reviewer`        | Reviews the final pull request                                |
@@ -110,7 +110,7 @@ The work is done by OpenCode agents defined in the OpenCode configuration pulled
 
 Before each run the `.github/actions/model-availability` action checks which AI models are currently reachable.
 
-- It tries the free OpenCode models first, then the VSHN_US_AI models.
+- Free models are listed first in the availability output and are preferred when no specific model is requested.
 - Results are cached in a GitHub issue titled **"model-discovery cache"** inside `agent-vshn-todo`.
 - A model that passed its last check is trusted for 24 hours.
 - A model that failed is retried after 2 hours.
@@ -164,10 +164,10 @@ A matching test was added to prove the key is sent, in `.github/actions/model-av
 
 ### Example B — letting free models push their work
 
-- **Issue:** [bacluc-agent/agent-todo#80](https://github.com/bacluc-agent/agent-todo/issues/80) — "Enable the free models to use the BACLUC_AGENT...github token"
+- **Issue:** [bacluc-agent/agent-todo#80](https://github.com/bacluc-agent/agent-todo/issues/80) — "Enable the free models to use the BACLUC_AGENT_GITHUB_TOKEN"
 - **Pull request:** [bacluc-agent/agent-todo#87](https://github.com/bacluc-agent/agent-todo/pull/87) — "fix(workflow): use BACLUC_AGENT_GITHUB_TOKEN for checkout to enable free model pushes" (merged)
 
-**What happened:** The cheaper free models were checking out the repository with the default `GITHUB_TOKEN`, which does not have permission to push code. Switching the checkout step to use `BACLUC_AGENT_GITHUB_TOKEN` gave them the push permission they needed.
+**What happened:** The cheaper free models were checking out the repository with the default `GITHUB_TOKEN`, which does not have permission to push code. Switching the checkout step to use `BACLUC_AGENT_GITHUB_TOKEN` gave them the push permission they needed. This example is from the remote `bacluc-agent/agent-todo` repository, which uses the same runner setup.
 
 Code change in `.github/workflows/opencode.yml`:
 
@@ -201,7 +201,7 @@ Repository variables:
 
 - `ISSUE_REPOSITORY`: repository that holds the issues (defaults to this repository)
 - `MODEL_AVAILABILITY_CACHE_ISSUE`: issue number of the model-discovery cache (auto-detected by title when unset)
-- `VSHN_US_AI_BASE_URL`: base URL of the vshn-us-ai provider (unset until the API key is configured)
+- `VSHN_US_AI_BASE_URL`: base URL of the vshn-us-ai provider (required to use VSHN_US_AI models)
 
 Repository secrets:
 
