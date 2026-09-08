@@ -94,7 +94,7 @@ jobs:
           selection_model=''
           # Exclude known-weak free models (ling-3.0-flash-fin-free, mimo-v2.5-free, nemotron-*)
           # per model-discovery.md (provision-machines devel branch); they pass the trivial OK
-          # probe but fail as coordinator/selector in 10+ runs.
+          # probe but fail as coordinator/selector in 10+ runs (e.g. 34029380869, 34042660858).
           mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models_file" | grep -Ev '/(ling-3\.0-flash-fin|mimo-v2\.5)-free$|/nemotron-' | awk '!seen[$0]++')
           for candidate in \
             'vshn-us-ai/subscription.qwen3.8-flash' \
