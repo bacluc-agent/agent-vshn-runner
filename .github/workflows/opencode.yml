@@ -16,6 +16,25 @@ on:
         required: false
         type: number
         default: 120
+      model_choice:
+        description: Preferred model from the dropdown. Ignored when 'model' is filled in.
+        required: false
+        type: choice
+        default: auto
+        options:
+          - auto
+          - vshn-us-ai/subscription.qwen3.8-flash
+          - vshn-us-ai/subscription.qwen3.8-max
+          - vshn-us-ai/subscription.glm-5.2
+          - vshn-us-ai/subscription.glm-5.3-flash
+          - vshn-us-ai/subscription.kimi-k3
+          - vshn-us-ai/subscription.deepseek-v4-pro
+          - opencode/big-pickle
+          - opencode/muse-spark-1.3-contributor-free
+          - opencode/mimo-v2.5-free
+          - opencode/nemotron-3-ultra-free
+          - opencode/nemotron-3.5-lightning-free
+          - opencode/ling-3.0-flash-fin-free
   workflow_call:
     inputs:
       prompt:
@@ -58,11 +77,14 @@ jobs:
       - name: Print inputs
         run: |
           printf "prompt: %s\n" "$PROMPT"
-          printf "requested_model: %s\n" "$REQUESTED_MODEL"
+          requested="${MODEL_TEXT:-}"
+          if [[ -z "$requested" && "${MODEL_CHOICE:-auto}" != auto ]]; then requested="$MODEL_CHOICE"; fi
+          printf "requested_model: %s\n" "$requested"
           printf "timeout_minutes: %s\n" "$TIMEOUT_MINUTES"
         env:
           PROMPT: ${{ inputs.prompt }}
-          REQUESTED_MODEL: ${{ inputs.model }}
+          MODEL_TEXT: ${{ inputs.model }}
+          MODEL_CHOICE: ${{ inputs.model_choice }}
           TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
 
       - name: Check out target repository
@@ -89,12 +111,16 @@ jobs:
         shell: bash
         env:
           PROMPT: ${{ inputs.prompt }}
-          REQUESTED_MODEL: ${{ inputs.model }}
+          MODEL_TEXT: ${{ inputs.model }}
+          MODEL_CHOICE: ${{ inputs.model_choice }}
           AVAILABLE_MODELS: ${{ steps.model-availability.outputs.available-models }}
           GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
           BACLUC_AGENT_GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
         run: |
           set -Eeuo pipefail
+
+          requested="${MODEL_TEXT:-}"
+          if [[ -z "$requested" && "${MODEL_CHOICE:-auto}" != auto ]]; then requested="$MODEL_CHOICE"; fi
 
           printf '::add-mask::%s\n' "$GITHUB_TOKEN"
           printf '::add-mask::%s\n' "$VSHN_US_AI_API_KEY"
@@ -106,16 +132,38 @@ jobs:
           printf '\n\n\n\n\n\n'
 
           fallback_model=''
-          if [[ -n "$AVAILABLE_MODELS" ]]; then
-            fallback_model="$(printf '%s\n' "$AVAILABLE_MODELS" | awk 'NF { print; exit }')"
+          # Exclude known-weak free models (ling-3.0-flash-fin-free, mimo-v2.5-free, nemotron-*):
+          # they pass the trivial OK probe but fail as coordinator in 10+ runs.
+          mapfile -t free_models < <(grep -E '^opencode/[^[:space:]]+-free$' "$available_models_file" | grep -Ev '/(ling-3\.0-flash-fin|mimo-v2\.5)-free$|/nemotron-' | awk '!seen[$0]++')
+          for candidate in \
+            'vshn-us-ai/subscription.qwen3.8-flash' \
+            'vshn-us-ai/subscription.qwen3.8-max' \
+            'opencode/big-pickle' \
+            "${free_models[@]}"; do
+            case "$candidate" in
+              vshn-us-ai/*)
+                grep -Fxq "$candidate" "$available_models_file" && [[ -n "${VSHN_US_AI_API_KEY:-}" ]] || continue
+                ;;
+              opencode/big-pickle)
+                grep -Fxq "$candidate" "$available_models_file" || continue
+                ;;
+              opencode/*-free) ;;
+              *) continue ;;
+            esac
+            fallback_model="$candidate"
+            break
+          done
+          if [[ -z "$fallback_model" ]]; then
+            fallback_model="$(awk 'NF { print; exit }' "$available_models_file")"
+            [[ -n "$fallback_model" ]] && printf 'No preferred coordinator model available; using fallback model: %s\n' "$fallback_model"
           fi
-          if [[ -z "$fallback_model" && -z "${REQUESTED_MODEL:-}" ]]; then
+          if [[ -z "$fallback_model" && -z "$requested" ]]; then
             printf '%s\n' 'No coordinator fallback model is available; not dispatching.' >&2
             exit 1
           fi
 
           printf '%s\n' 'Model selection reasoning: use the requested model unchanged when provided; otherwise discover an available coordinator model.'
-          model="${REQUESTED_MODEL:-}"
+          model="$requested"
           if [[ -z "$model" ]]; then
             discovery_output="$RUNNER_TEMP/model-discovery.out"
             discovery_prompt="$(printf '%s\n' \
@@ -162,7 +210,7 @@ jobs:
           requested = sys.argv[1]
           available = [line.strip() for line in open(sys.argv[2]) if line.strip()]
           aliases = {
-              "qwen-3.8-flash": "vshn-us-ai/subscription.qwen3.8-max",
+              "qwen-3.8-flash": "vshn-us-ai/subscription.qwen3.8-flash",
           }
 
           if requested in available:
