@@ -88,42 +88,16 @@ jobs:
           printf 'Selecting model...\n'
           printf '\n\n\n\n\n\n'
 
-          available_models_file="$RUNNER_TEMP/available-models.txt"
-          printf '%s\n' "$AVAILABLE_MODELS" > "$available_models_file"
-
           selection_model=''
-          # Exclude known-weak free models (ling-3.0-flash-fin-free, mimo-v2.5-free, nemotron-*)
-          # per model-discovery.md (provision-machines devel branch); they pass the trivial OK
-          # probe but fail as coordinator/selector in 10+ runs (e.g. 34029380869, 34042660858).
-          mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models_file" | grep -Ev '/(ling-3\.0-flash-fin|mimo-v2\.5)-free$|/nemotron-' | awk '!seen[$0]++')
-          for candidate in \
-            'vshn-us-ai/subscription.qwen3.8-flash' \
-            'opencode/big-pickle' \
-            "${free_models[@]}"; do
-            case "$candidate" in
-              vshn-us-ai/*)
-                grep -Fxq "$candidate" "$available_models_file" && [[ -n "$VSHN_US_AI_API_KEY" ]] || continue
-                ;;
-              opencode/big-pickle)
-                grep -Fxq "$candidate" "$available_models_file" || continue
-                ;;
-              opencode/*-free) ;;
-              *) continue ;;
-            esac
-            selection_model="$candidate"
-            break
-          done
+          if [[ -n "$AVAILABLE_MODELS" ]]; then
+            selection_model="$(printf '%s\n' "$AVAILABLE_MODELS" | awk 'NF { print; exit }')"
+          fi
           if [[ -z "$selection_model" ]]; then
-            selection_model=$(head -n1 "$available_models_file")
-            if [[ -z "$selection_model" ]]; then
-              printf '%s\n' 'No issue-selection model is available; not dispatching.' >&2
-              exit 1
-            fi
-            printf '%s\n' "Using fallback model: $selection_model" >&2
+            printf '%s\n' 'No issue-selection model is available; not dispatching.' >&2
+            exit 1
           fi
           printf 'Issue selection model: %s\n' "$selection_model"
           echo "selection_model=${selection_model}" >> "$GITHUB_OUTPUT"
-          export MODEL="$selection_model"
           printf '\n\n\n\n\n\n'
           printf 'Choosing issue...\n'
           printf '\n\n\n\n\n\n'
@@ -171,6 +145,21 @@ jobs:
 
           printf '%s\n' 'Implementation prompt:'
           cat "$selection"
+
+      - name: Update cache on selection failure
+        if: failure() && steps.pick.outputs.selection_model != '' && steps.model-availability.outputs.cache-issue != ''
+        shell: bash
+        env:
+          MODEL: ${{ steps.pick.outputs.selection_model }}
+          CACHE_ISSUE: ${{ steps.model-availability.outputs.cache-issue }}
+          GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          cache_json=$(gh issue view "$CACHE_ISSUE" -R "$ISSUE_REPOSITORY" --json body --jq '.body' 2>/dev/null || echo '{}')
+          checked="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          new_cache=$(echo "$cache_json" | jq --arg model "$MODEL" --arg checked "$checked" \
+            '. + {($model): {"ok": false, "checked": $checked}}')
+          gh issue edit "$CACHE_ISSUE" -R "$ISSUE_REPOSITORY" --body "$new_cache" || true
 
       - name: Dump debug output
         if: always()
