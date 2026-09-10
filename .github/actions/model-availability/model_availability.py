@@ -128,10 +128,20 @@ def fetch_model_ids(endpoint: str, api_key: str | None = None) -> list[str]:
 
 def discover_models() -> tuple[list[str], dict[str, list[str]]]:
     """free_models from `opencode models`; provider_models: {provider: model_ids} per provider."""
-    output = subprocess.run(
+    result = subprocess.run(
         ["opencode", "models"], check=True, capture_output=True, text=True, timeout=600
-    ).stdout
-    free_models = parse_free_models(output)
+    )
+    log_dir = os.path.join(
+        os.environ.get("RUNNER_TEMP") or tempfile.gettempdir(), "model-probes"
+    )
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        with open(os.path.join(log_dir, "opencode-models.log"), "w") as handle:
+            handle.write(result.stdout)
+            handle.write(getattr(result, "stderr", ""))
+    except OSError:
+        pass
+    free_models = parse_free_models(result.stdout)
     base_urls = load_provider_base_urls()
     provider_models = {}
     for provider, key_env in PROVIDERS:
@@ -192,6 +202,16 @@ def probe_model(
         )
     except subprocess.TimeoutExpired:
         return False
+    log_dir = os.path.join(work_dir, "model-probes")
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        with open(
+            os.path.join(log_dir, "probe-" + candidate.replace("/", "-") + ".log"), "w"
+        ) as handle:
+            handle.write(result.stdout)
+            handle.write(result.stderr)
+    except OSError:
+        pass
     text = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", result.stdout)
     return result.returncode == 0 and re.fullmatch(r"\s*OK\.?\s*", text) is not None
 
