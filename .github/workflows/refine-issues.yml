@@ -1,0 +1,230 @@
+name: Refine issues
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  refine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
+      VSHN_US_AI_API_KEY: ${{ secrets.VSHN_US_AI_API_KEY }}
+      ISSUE_REPOSITORY: ${{ vars.ISSUE_REPOSITORY || github.repository }}
+      MODEL_AVAILABILITY_CACHE_ISSUE: ${{ vars.MODEL_AVAILABILITY_CACHE_ISSUE }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ vars.ISSUE_REPOSITORY || github.repository }}
+          token: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
+
+      - name: Set up OpenCode
+        uses: bacluc-agent/agent-vshn-runner/.github/actions/setup-opencode@main
+
+      - name: Check model availability
+        id: model-availability
+        uses: bacluc-agent/agent-vshn-runner/.github/actions/model-availability@main
+
+      - name: Refine issues
+        id: refine
+        timeout-minutes: 22
+        shell: bash
+        env:
+          AVAILABLE_MODELS: ${{ steps.model-availability.outputs.available-models }}
+        run: |
+          set -Eeuo pipefail
+
+          printf '::add-mask::%s\n' "$GITHUB_TOKEN"
+          printf '::add-mask::%s\n' "$VSHN_US_AI_API_KEY"
+
+          gh label create agent-refined -R "$ISSUE_REPOSITORY" \
+            --color 1D76DB --description 'Refined by the issue-refiner agent' --force
+          gh label create ready-for-implementation -R "$ISSUE_REPOSITORY" \
+            --color 0E8A16 --description 'Approved for agent implementation' --force
+
+          printf '\n\n\n\n\n\n'
+          printf 'Fetching github issues...\n'
+          printf '\n\n\n\n\n\n'
+
+          search_json="$RUNNER_TEMP/candidates.json"
+          gh api "search/issues?q=repo:${ISSUE_REPOSITORY}+is:open+is:issue+-label:agent-refined+-label:ready-for-implementation+-label:agent-ignore+-label:agent-running+sort:created-asc&per_page=5" \
+            --jq '.items' > "$search_json"
+
+          candidates="$RUNNER_TEMP/candidate-numbers.txt"
+          jq -r '.[].number | tostring' "$search_json" > "$candidates"
+          if [[ ! -s "$candidates" ]]; then
+            printf '%s\n' 'No unrefined open issues; nothing to do.'
+            exit 0
+          fi
+          printf 'Unrefined candidate issues (oldest first):\n'
+          cat "$candidates"
+          printf '\n\n\n\n\n\n'
+          printf 'Selecting model...\n'
+          printf '\n\n\n\n\n\n'
+
+          available_models_file="$RUNNER_TEMP/available-models.txt"
+          printf '%s\n' "$AVAILABLE_MODELS" > "$available_models_file"
+
+          selection_model=''
+          # Exclude known-weak free models (ling-3.0-flash-fin-free, mimo-v2.5-free, nemotron-*)
+          # per model-discovery.md (provision-machines devel branch); they pass the trivial OK
+          # probe but fail as coordinator/selector in 10+ runs (e.g. 34029380869, 34042660858).
+          mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models_file" | grep -Ev '/(ling-3\.0-flash-fin|mimo-v2\.5)-free$|/nemotron-' | awk '!seen[$0]++')
+          for candidate in \
+            'vshn-us-ai/subscription.qwen3.8-max' \
+            'opencode/big-pickle' \
+            "${free_models[@]}"; do
+            case "$candidate" in
+              vshn-us-ai/*)
+                grep -Fxq "$candidate" "$available_models_file" && [[ -n "$VSHN_US_AI_API_KEY" ]] || continue
+                ;;
+              opencode/big-pickle)
+                grep -Fxq "$candidate" "$available_models_file" || continue
+                ;;
+              opencode/*-free) ;;
+              *) continue ;;
+            esac
+            selection_model="$candidate"
+            break
+          done
+          if [[ -z "$selection_model" ]]; then
+            selection_model=$(head -n1 "$available_models_file")
+            if [[ -z "$selection_model" ]]; then
+              printf '%s\n' 'No refinement model is available; not dispatching.' >&2
+              exit 1
+            fi
+            printf '%s\n' "Using fallback model: $selection_model" >&2
+          fi
+          printf 'Refinement model: %s\n' "$selection_model"
+          printf '\n\n\n\n\n\n'
+
+          refined=0
+          failed=0
+          max_attempts=2
+          SECONDS=0
+
+          while IFS= read -r number; do
+            printf '\n=== Refining issue #%s ===\n' "$number"
+            if (( SECONDS > 18 * 60 )); then
+              printf '%s\n' 'Budget reached; remaining issues are left for the next run.'
+              break
+            fi
+            printf '\n\n\n\n\n\n'
+
+            title="$(gh issue view "$number" --json title --jq '.title' -R "$ISSUE_REPOSITORY")"
+            body="$(gh issue view "$number" --json body --jq '.body' -R "$ISSUE_REPOSITORY")"
+
+            prompt="$RUNNER_TEMP/refine-prompt.txt"
+            {
+              printf '%s\n' 'Refine the following GitHub issue into clear, agent-ready text.'
+              printf '%s\n' ''
+              printf 'Issue #%s: %s\n' "$number" "$title"
+              printf '%s\n' ''
+              printf '%s\n' 'Current body:'
+              printf '%s\n' "$body"
+              printf '%s\n' ''
+              printf '%s\n' 'Your task: rewrite the issue body so that a coding agent can implement it'
+              printf '%s\n' 'without ambiguity. The refined body MUST contain exactly two sections:'
+              printf '%s\n' ''
+              printf '%s\n' '## Goal'
+              printf '%s\n' 'A single, precise sentence describing what the final state should be.'
+              printf '%s\n' ''
+              printf '%s\n' '## How to implement'
+              printf '%s\n' 'Concrete steps, files to touch, and patterns to follow — enough for an'
+              printf '%s\n' 'agent to start coding immediately.'
+              printf '%s\n' ''
+              printf '%s\n' 'Do NOT include any step to run ./scripts/completion-check,'
+              printf '%s\n' 'AGENTS.md completion-check-command, or /completion-check-command'
+              printf '%s\n' '— opencode enforces the AGENTS.md completion-check-command'
+              printf '%s\n' 'automatically, so repeating it in the refined body is redundant.'
+              printf '%s\n' ''
+              printf '%s\n' 'Output ONLY the new issue body. No preamble, no markdown fences around'
+              printf '%s\n' 'the whole output, no commentary.'
+            } > "$prompt"
+
+            out="$RUNNER_TEMP/refine-out-${number}.txt"
+            for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+              if ((SECONDS > 18 * 60)); then
+                printf '%s\n' 'Budget reached; remaining issues are left for the next run.'
+                break
+              fi
+
+              set +e
+              timeout 8m opencode run --agent issue-refiner --model "$selection_model" --title "issue-refiner" \
+                "$(< "$prompt")" 2> >(tee "${out}.stderr" >&2) | tee "$out"
+              statuses=("${PIPESTATUS[@]}")
+              opencode_status=${statuses[0]}
+              tee_status=${statuses[1]}
+              validation_out="$(python3 scripts/validate_refined_issue.py --file "$out" 2>&1)"
+              validation_status=$?
+              set -e
+
+              if (( tee_status != 0 )); then
+                printf 'Tee failed for issue #%s (tee=%s); skipping.\n' "$number" "$tee_status" >&2
+                (( failed++ )) || true
+                break
+              fi
+              if (( opencode_status != 0 )); then
+                printf 'Refinement failed for issue #%s (opencode=%s); skipping.\n' "$number" "$opencode_status" >&2
+                (( failed++ )) || true
+                break
+              fi
+              if (( validation_status == 0 )); then
+                gh issue edit "$number" --body-file "$out" -R "$ISSUE_REPOSITORY"
+                gh issue edit "$number" --add-label "agent-refined" -R "$ISSUE_REPOSITORY"
+                printf 'Issue #%s refined and labeled.\n' "$number"
+                (( refined++ )) || true
+                break
+              fi
+
+              reason="${validation_out##*REFINE_VALIDATION: }"
+              case "$reason" in
+                empty|missing_goal_heading|missing_impl_heading|empty_goal|empty_how_to_implement|wrong_order|extra_sections|fenced_output|hostile_text|ok) ;;
+                *) reason='validator_unavailable' ;;
+              esac
+              printf 'Issue #%s attempt %s rejected: %s\n' "$number" "$attempt" "$reason"
+              if (( attempt == max_attempts )); then
+                printf 'Issue #%s not refined: %s\n' "$number" "$reason"
+                (( failed++ )) || true
+                break
+              fi
+
+              retry_prompt="$RUNNER_TEMP/refine-retry-prompt-${number}.txt"
+              {
+                cat "$prompt"
+                printf '\nYour previous draft was rejected: reason=%s.\n' "$reason"
+                printf '%s\n' ''
+                printf '%s\n' 'The rejected draft was:'
+                printf '%s\n' ''
+                cat "$out"
+                printf '\n\n'
+                printf '%s\n' 'Output ONLY the corrected issue body with exactly these two sections:'
+                printf '%s\n' ''
+                printf '%s\n' '## Goal'
+                printf '%s\n' 'A single, precise sentence describing what the final state should be.'
+                printf '%s\n' ''
+                printf '%s\n' '## How to implement'
+                printf '%s\n' 'Concrete steps, files to touch, and patterns to follow — enough for an'
+                printf '%s\n' 'agent to start coding immediately.'
+              } > "$retry_prompt"
+              prompt="$retry_prompt"
+            done
+          done < "$candidates"
+
+          printf '\nRefinement complete: %s refined, %s failed.\n' "$refined" "$failed"
+
+      - name: Dump debug output
+        if: always()
+        shell: bash
+        env:
+          COORDINATOR_SESSION_TITLE: issue-refiner
+        run: |
+          python3 scripts/dump_subagent_transcripts.py || true
