@@ -79,6 +79,12 @@ jobs:
         id: model-availability
         uses: bacluc-agent/agent-vshn-runner/.github/actions/model-availability@main
 
+      - name: Dump model probe debug output
+        if: always()
+        shell: bash
+        run: |
+          cat "$RUNNER_TEMP"/model-probes/*.log 2>/dev/null || true
+
       - name: Select model
         id: select-model
         shell: bash
