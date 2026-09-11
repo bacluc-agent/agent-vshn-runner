@@ -88,15 +88,30 @@ jobs:
           printf 'Selecting model...\n'
           printf '\n\n\n\n\n\n'
 
+          available_models_file="$RUNNER_TEMP/available-models.txt"
+          printf '%s\n' "$AVAILABLE_MODELS" > "$available_models_file"
+
           selection_model=''
-          if [[ -n "$AVAILABLE_MODELS" ]]; then
-            selection_model="$(printf '%s\n' "$AVAILABLE_MODELS" | awk 'NF { print; exit }')"
-          fi
+          # Exclude known-weak free models: ling-3.0-flash-fin-free, mimo-v2.5-free, nemotron-*.
+          mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models_file" | grep -Ev '/(ling-3\.0-flash-fin|mimo-v2\.5)-free$|/nemotron-' | awk '!seen[$0]++')
+          for candidate in \
+            'vshn-us-ai/subscription.qwen3.8-max' \
+            "${free_models[@]}"; do
+            grep -Fxq "$candidate" "$available_models_file" || continue
+            selection_model="$candidate"
+            break
+          done
           if [[ -z "$selection_model" ]]; then
-            printf '%s\n' 'No issue-selection model is available; not dispatching.' >&2
-            exit 1
+            selection_model=$(head -n1 "$available_models_file")
+            if [[ -z "$selection_model" ]]; then
+              printf '%s\n' 'No issue-selection model is available; not dispatching.' >&2
+              exit 1
+            fi
+            printf '%s\n' "Using fallback model: $selection_model" >&2
           fi
           printf 'Issue selection model: %s\n' "$selection_model"
+          echo "selection_model=${selection_model}" >> "$GITHUB_OUTPUT"
+          export MODEL="$selection_model"
           printf '\n\n\n\n\n\n'
           printf 'Choosing issue...\n'
           printf '\n\n\n\n\n\n'
