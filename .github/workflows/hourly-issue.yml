@@ -122,6 +122,8 @@ jobs:
             printf '%s\n' "Using fallback model: $selection_model" >&2
           fi
           printf 'Issue selection model: %s\n' "$selection_model"
+          echo "selection_model=${selection_model}" >> "$GITHUB_OUTPUT"
+          export MODEL="$selection_model"
           printf '\n\n\n\n\n\n'
           printf 'Choosing issue...\n'
           printf '\n\n\n\n\n\n'
