@@ -20,5 +20,6 @@ check() {
 
 check 'formatting (prettier --check .)' docker run --rm "${mount[@]}" ghcr.io/bacluc/prettier-image/prettier-image:3.9.4 --check .
 check 'actionlint (workflows + used actions)' docker run --rm "${mount[@]}" rhysd/actionlint:1.7.12 -color
+check 'pytest (python tests)' uv run --group dev pytest -q .github/actions/model-availability scripts
 
 exit "$status"
