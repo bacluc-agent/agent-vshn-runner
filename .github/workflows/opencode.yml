@@ -31,6 +31,10 @@ on:
         required: false
         type: number
         default: 120
+      repository:
+        description: Repository to check out (owner/repo). Defaults to the issue repository.
+        required: false
+        type: string
 
 permissions:
   actions: write
@@ -68,7 +72,7 @@ jobs:
       - name: Check out target repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ vars.ISSUE_REPOSITORY || github.repository }}
+          repository: ${{ inputs.repository || vars.ISSUE_REPOSITORY || github.repository }}
           fetch-depth: 0
           token: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
 
