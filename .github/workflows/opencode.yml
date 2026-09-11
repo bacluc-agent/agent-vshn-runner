@@ -126,7 +126,7 @@ jobs:
               'Output exactly one line: CARRIERS: coordinator: provider/model')"
             printf 'Model discovery prompt:\n%s\n' "$discovery_prompt"
             set +e
-            timeout 5m opencode run --agent model-discovery --model "$fallback_model" "$discovery_prompt" 2> >(tee "${discovery_output}.stderr" >&2) | tee "$discovery_output"
+            timeout 5m opencode run --agent model-discovery --model "$fallback_model" --title "model-discovery" "$discovery_prompt" 2> >(tee "${discovery_output}.stderr" >&2) | tee "$discovery_output"
             discovery_statuses=("${PIPESTATUS[@]}")
             discovery_status=${discovery_statuses[0]}
             discovery_tee_status=${discovery_statuses[1]}
@@ -273,5 +273,13 @@ jobs:
         shell: bash
         env:
           COORDINATOR_SESSION_TITLE: coordinator-run
+        run: |
+          python3 scripts/dump_subagent_transcripts.py || true
+
+      - name: Dump debug output
+        if: always()
+        shell: bash
+        env:
+          COORDINATOR_SESSION_TITLE: model-discovery
         run: |
           python3 scripts/dump_subagent_transcripts.py || true
