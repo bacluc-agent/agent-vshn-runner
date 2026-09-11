@@ -12,6 +12,10 @@ runs:
       shell: bash
       run: npm install --global opencode-ai@1.18.21
 
+    - name: Install uv
+      shell: bash
+      run: pipx install uv
+
     - name: Fetch and prepare OpenCode configuration
       id: config
       shell: bash
