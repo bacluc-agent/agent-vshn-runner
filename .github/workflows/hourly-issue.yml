@@ -70,6 +70,8 @@ jobs:
 
           gh label create agent-running -R "$ISSUE_REPOSITORY" \
             --color 0E8A16 --description 'Selected by the hourly issue runner' --force
+          gh label create ready-for-implementation -R "$ISSUE_REPOSITORY" \
+            --color 0E8A16 --description 'Approved for agent implementation' --force
 
           printf '\n\n\n\n\n\n'
           printf 'Fetching github issues...\n'
@@ -85,7 +87,10 @@ jobs:
           candidates="$RUNNER_TEMP/candidate-numbers.txt"
           jq -r '.[].number | tostring' "$search_json" > "$candidates"
           if [[ ! -s "$candidates" ]]; then
-            printf '%s\n' 'No unclaimed open issues; nothing to do.'
+            # refine-issues.yml only applies 'agent-refined'; a human applies
+            # 'ready-for-implementation' as the approval gate, so an idle run
+            # means no issue has been approved yet.
+            printf '%s\n' 'No open issue is labeled ready-for-implementation; nothing to do.'
             exit 0
           fi
           printf 'Unclaimed candidate issues (oldest first):\n'
