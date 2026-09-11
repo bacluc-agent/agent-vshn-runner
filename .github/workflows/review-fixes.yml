@@ -12,7 +12,7 @@ on:
         required: false
         type: string
       model:
-        description: Optional OpenCode model override (e.g. vshn-us-ai/subscription.glm-5.2)
+        description: Optional OpenCode model override (e.g. opencode-go-openai/glm-5.2)
         required: false
         type: string
 
@@ -38,12 +38,10 @@ jobs:
       pr_metadata: ${{ steps.find.outputs.pr_metadata }}
     env:
       GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
-      ISSUE_REPOSITORY: ${{ vars.ISSUE_REPOSITORY || github.repository }}
     steps:
-      - name: Check out target repository
+      - name: Check out runner repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ vars.ISSUE_REPOSITORY || github.repository }}
           fetch-depth: 0
           token: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
 
@@ -66,7 +64,7 @@ jobs:
             seen[$pr]=1
           done < <(
             gh api --paginate \
-              "search/issues?q=repo:${ISSUE_REPOSITORY}+is:pr+is:open+reviewed-by:Bacluc&per_page=100" \
+              "search/issues?q=repo:${{ github.repository }}+is:pr+is:open+reviewed-by:Bacluc&per_page=100" \
               --jq '.items[].number' 2>/dev/null || true
           )
 
@@ -75,7 +73,7 @@ jobs:
             seen[$pr]=1
           done < <(
             gh api --paginate \
-              "search/issues?q=repo:${ISSUE_REPOSITORY}+is:pr+is:open+reviewed-by:bacluc-agent&per_page=100" \
+              "search/issues?q=repo:${{ github.repository }}+is:pr+is:open+reviewed-by:bacluc-agent&per_page=100" \
               --jq '.items[].number' 2>/dev/null || true
           )
 
@@ -102,7 +100,7 @@ jobs:
 
           pr_metadata="{}"
           for pr_number in "${unique_prs[@]}"; do
-            pr_info=$(gh pr view "$pr_number" -R "$ISSUE_REPOSITORY" --json number,title,headRefName,url)
+            pr_info=$(gh pr view "$pr_number" -R "${{ github.repository }}" --json number,title,headRefName,url)
             if [[ -n "${OVERRIDE_PROMPT:-}" ]]; then
               prompt="$OVERRIDE_PROMPT"
             else
