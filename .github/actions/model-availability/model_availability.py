@@ -288,6 +288,9 @@ def main() -> int:
     work_dir = os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()
     results = probe_candidates(pending, work_dir)
     checked = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Re-read the cache right before updating to avoid clobbering concurrent runs' updates
+    if cache_issue is not None:
+        cache = read_cache(cache_issue) or cache
     cache = merge_results(cache, results, checked)
     if cache_issue is not None:
         write_cache(cache_issue, cache)
