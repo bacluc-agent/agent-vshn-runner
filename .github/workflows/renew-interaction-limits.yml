@@ -1,0 +1,24 @@
+name: Renew interaction limits
+
+on:
+  schedule:
+    - cron: "0 0 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
+    steps:
+      - name: Renew interaction limit
+        run: |
+          set -Eeuo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/interaction-limits" \
+            -X PUT \
+            -f limit=collaborators_only \
+            -f expiry=six_months
