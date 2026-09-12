@@ -419,12 +419,12 @@ class TestDiscoverModelsLogging:
 
 
 class TestMainReReadsCache:
-    def test_preserves_cache_when_reread_fails(self, monkeypatch):
+    def test_reread_preserves_concurrent_updates(self, monkeypatch):
         monkeypatch.setattr(model_availability, "resolve_cache_issue", lambda: "3")
         reads = iter(
             [
-                {"model-a": {"ok": True, "checked": "2026-09-12T00:00:00Z"}},
                 {},
+                {"model-a": {"ok": True, "checked": "2026-09-12T00:00:00Z"}},
             ]
         )
         monkeypatch.setattr(model_availability, "read_cache", lambda issue: next(reads))
