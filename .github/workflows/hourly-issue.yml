@@ -178,6 +178,21 @@ jobs:
           printf '%s\n' 'Implementation prompt:'
           cat "$selection"
 
+      - name: Update cache on selection failure
+        if: failure() && steps.pick.outputs.selection_model != '' && steps.model-availability.outputs.cache-issue != ''
+        shell: bash
+        env:
+          MODEL: ${{ steps.pick.outputs.selection_model }}
+          CACHE_ISSUE: ${{ steps.model-availability.outputs.cache-issue }}
+          GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          cache_json=$(gh issue view "$CACHE_ISSUE" -R "$ISSUE_REPOSITORY" --json body --jq '.body' 2>/dev/null || echo '{}')
+          checked="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          new_cache=$(echo "$cache_json" | jq --arg model "$MODEL" --arg checked "$checked" \
+            '. + {($model): {"ok": false, "checked": $checked}}')
+          gh issue edit "$CACHE_ISSUE" -R "$ISSUE_REPOSITORY" --body "$new_cache" || true
+
       - name: Dump debug output
         if: always()
         shell: bash
