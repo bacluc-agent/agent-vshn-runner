@@ -10,7 +10,7 @@ runs:
   steps:
     - name: Install OpenCode
       shell: bash
-      run: npm install --global opencode-ai@1.18.23
+      run: npm install --global opencode-ai@1.18.21
 
     - name: Install uv
       shell: bash
