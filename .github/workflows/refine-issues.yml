@@ -23,15 +23,14 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ vars.ISSUE_REPOSITORY || github.repository }}
           token: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
 
       - name: Set up OpenCode
-        uses: bacluc-agent/agent-vshn-runner/.github/actions/setup-opencode@main
+        uses: ./.github/actions/setup-opencode
 
       - name: Check model availability
         id: model-availability
-        uses: bacluc-agent/agent-vshn-runner/.github/actions/model-availability@main
+        uses: ./.github/actions/model-availability
 
       - name: Refine issues
         id: refine
