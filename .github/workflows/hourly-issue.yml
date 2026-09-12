@@ -62,10 +62,8 @@ jobs:
         env:
           SELECTION_PROMPT: ${{ inputs.selection_prompt }}
           AVAILABLE_MODELS: ${{ steps.model-availability.outputs.available-models }}
-          OPENCODE_FATAL_STAGE: selection
         run: |
           set -Eeuo pipefail
-          rm -f "$RUNNER_TEMP/opencode-fatal.json"
 
           printf '::add-mask::%s\n' "$GITHUB_TOKEN"
           printf '::add-mask::%s\n' "$VSHN_US_AI_API_KEY"
@@ -191,22 +189,8 @@ jobs:
           set -Eeuo pipefail
           cache_json=$(gh issue view "$CACHE_ISSUE" -R "$ISSUE_REPOSITORY" --json body --jq '.body' 2>/dev/null || echo '{}')
           checked="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          fatal_model=""
-          fatal_reason=""
-          if [[ -f "$RUNNER_TEMP/opencode-fatal.json" ]]; then
-            fatal_model=$(jq -r '.model' "$RUNNER_TEMP/opencode-fatal.json")
-            fatal_reason=$(jq -r '.reason' "$RUNNER_TEMP/opencode-fatal.json")
-            printf '::error::fatal provider error (%s) from model %s\n' "$fatal_reason" "$fatal_model"
-          fi
-          fatal_provider="${fatal_model%/*}"
-          MODEL="${fatal_model:-$MODEL}"
-          if [[ "$fatal_reason" == balance || "$fatal_reason" == auth ]]; then
-            new_cache=$(echo "$cache_json" | jq --arg provider "$fatal_provider" --arg checked "$checked" \
-              'with_entries(if (.key | split("/")[0]) == $provider then .value = {"ok": false, "checked": $checked} else . end)')
-          else
-            new_cache=$(echo "$cache_json" | jq --arg model "$MODEL" --arg checked "$checked" \
-              '. + {($model): {"ok": false, "checked": $checked}}')
-          fi
+          new_cache=$(echo "$cache_json" | jq --arg model "$MODEL" --arg checked "$checked" \
+            '. + {($model): {"ok": false, "checked": $checked}}')
           gh issue edit "$CACHE_ISSUE" -R "$ISSUE_REPOSITORY" --body "$new_cache" || true
 
       - name: Dump debug output
