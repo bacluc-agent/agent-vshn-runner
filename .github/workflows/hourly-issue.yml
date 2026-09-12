@@ -81,17 +81,26 @@ jobs:
           # Oldest-first: the 50-item page keeps the OLDEST 50 unclaimed issues instead of the
           # newest 50, so backlog items beyond the cap are the newest, not the oldest.
           search_json="$RUNNER_TEMP/candidates.json"
-          gh api "search/issues?q=repo:${ISSUE_REPOSITORY}+is:open+is:issue+label:ready-for-implementation+-label:agent-running+sort:created-asc&per_page=50" \
-            --jq '.items' > "$search_json"
-
           candidates="$RUNNER_TEMP/candidate-numbers.txt"
-          jq -r '.[].number | tostring' "$search_json" > "$candidates"
+          fetch_candidates() {
+            gh api "search/issues?q=repo:${ISSUE_REPOSITORY}+is:open+is:issue+label:$1+-label:agent-running+sort:created-asc&per_page=50" \
+              --jq '.items' > "$search_json"
+            jq -r '.[].number | tostring' "$search_json" > "$candidates"
+          }
+
+          fetch_candidates ready-for-implementation
           if [[ ! -s "$candidates" ]]; then
-            # refine-issues.yml only applies 'agent-refined'; a human applies
-            # 'ready-for-implementation' as the approval gate, so an idle run
-            # means no issue has been approved yet.
-            printf '%s\n' 'No open issue is labeled ready-for-implementation; nothing to do.'
-            exit 0
+            # ponytail: temporary starvation guard — the ready-for-implementation queue is empty today
+            # (nothing applies it), so fall back to agent-refined; remove once the queue is reliably non-empty.
+            printf '::warning::No ready-for-implementation issues; falling back to agent-refined candidates\n'
+            fetch_candidates agent-refined+-label:agent-ignore
+            if [[ ! -s "$candidates" ]]; then
+              # refine-issues.yml only applies 'agent-refined'; a human applies
+              # 'ready-for-implementation' as the approval gate, so an idle run
+              # means no issue has been approved yet.
+              printf '%s\n' 'No open issue is labeled ready-for-implementation; nothing to do.'
+              exit 0
+            fi
           fi
           printf 'Unclaimed candidate issues (oldest first):\n'
           cat "$candidates"
