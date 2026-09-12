@@ -350,3 +350,69 @@ class TestLoadProviderBaseUrls:
 
         monkeypatch.setattr(model_availability.subprocess, "run", fail)
         assert model_availability.load_provider_base_urls() == {}
+
+
+class TestProbeModelLogging:
+    def test_writes_probe_log_with_stdout_and_stderr(self, tmp_path, monkeypatch):
+        class FakeResult:
+            returncode = 0
+            stdout = "OK\n"
+            stderr = "debug: loaded model\n"
+
+        monkeypatch.setattr(
+            model_availability.subprocess, "run", lambda *args, **kwargs: FakeResult()
+        )
+        assert (
+            model_availability.probe_model("opencode-go-openai/glm-5.2", str(tmp_path))
+            is True
+        )
+        log = tmp_path / "model-probes" / "probe-opencode-go-openai-glm-5.2.log"
+        assert log.read_text() == "OK\ndebug: loaded model\n"
+
+    def test_writes_probe_log_even_when_probe_fails(self, tmp_path, monkeypatch):
+        class FakeResult:
+            returncode = 1
+            stdout = "model unavailable\n"
+            stderr = ""
+
+        monkeypatch.setattr(
+            model_availability.subprocess, "run", lambda *args, **kwargs: FakeResult()
+        )
+        assert model_availability.probe_model("opencode/a-free", str(tmp_path)) is False
+        log = tmp_path / "model-probes" / "probe-opencode-a-free.log"
+        assert log.read_text() == "model unavailable\n"
+
+
+class TestDiscoverModelsLogging:
+    def test_writes_opencode_models_log(self, tmp_path, monkeypatch):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b'{"data": []}'
+
+        def fake_run_logging(args, *a, **kw):
+            if args == ["opencode", "models"]:
+                return types.SimpleNamespace(
+                    stdout="opencode/a-free\nopencode/big-pickle\n", stderr=""
+                )
+            if args == ["opencode", "debug", "config"]:
+                return types.SimpleNamespace(stdout=json.dumps(CONFIG))
+            raise AssertionError(f"unexpected args: {args}")
+
+        monkeypatch.setattr(model_availability.subprocess, "run", fake_run_logging)
+        monkeypatch.setattr(
+            model_availability.urllib.request,
+            "urlopen",
+            lambda *args, **kwargs: FakeResponse(),
+        )
+        monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+        free_models, provider_models = model_availability.discover_models()
+        assert free_models == ["opencode/a-free", "opencode/big-pickle"]
+        assert provider_models == {"vshn-us-ai": []}
+        log = tmp_path / "model-probes" / "opencode-models.log"
+        assert log.read_text() == "opencode/a-free\nopencode/big-pickle\n"
