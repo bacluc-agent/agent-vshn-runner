@@ -282,8 +282,10 @@ jobs:
           COORDINATOR_TIMEOUT: ${{ inputs.timeout_minutes || 120 }}
           GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
           BACLUC_AGENT_GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
+          OPENCODE_FATAL_STAGE: coordinator
         run: |
           set -Eeuo pipefail
+          rm -f "$RUNNER_TEMP/opencode-fatal.json"
 
           coordinator_session_title='coordinator-run'
           PROMPT=$(printf 'model: %s \n %s' "$MODEL" "$PROMPT")
@@ -306,19 +308,42 @@ jobs:
           fi
           exit "$coordinator_tee_status"
 
+      - name: Fatal guard
+        id: fatal-guard
+        if: always() && steps.select-model.outcome == 'success'
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/opencode-fatal.json" ]]; then
+            reason=$(jq -r '.reason' "$RUNNER_TEMP/opencode-fatal.json")
+            fatal_model=$(jq -r '.model' "$RUNNER_TEMP/opencode-fatal.json")
+            printf '::error::fatal provider error (%s) from model %s\n' "$reason" "$fatal_model"
+            {
+              echo "fatal-model=${fatal_model}"
+              echo "fatal-reason=${reason}"
+              echo "fatal-provider=${fatal_model%/*}"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Update cache on coordinator failure
-        if: failure() && steps.select-model.outputs.model != '' && steps.model-availability.outputs.cache-issue != ''
+        if: (failure() || steps.fatal-guard.outputs.fatal-model != '') && (steps.select-model.outputs.model != '' || steps.fatal-guard.outputs.fatal-model != '') && steps.model-availability.outputs.cache-issue != ''
         shell: bash
         env:
-          MODEL: ${{ steps.select-model.outputs.model }}
+          MODEL: ${{ steps.fatal-guard.outputs.fatal-model || steps.select-model.outputs.model }}
+          FATAL_REASON: ${{ steps.fatal-guard.outputs.fatal-reason }}
+          FATAL_PROVIDER: ${{ steps.fatal-guard.outputs.fatal-provider }}
           CACHE_ISSUE: ${{ steps.model-availability.outputs.cache-issue }}
           GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
         run: |
           set -Eeuo pipefail
           cache_json=$(gh issue view "$CACHE_ISSUE" -R "$ISSUE_REPOSITORY" --json body --jq '.body' 2>/dev/null || echo '{}')
           checked="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          new_cache=$(echo "$cache_json" | jq --arg model "$MODEL" --arg checked "$checked" \
-            '. + {($model): {"ok": false, "checked": $checked}}')
+          if [[ "$FATAL_REASON" == balance || "$FATAL_REASON" == auth ]]; then
+            new_cache=$(echo "$cache_json" | jq --arg provider "$FATAL_PROVIDER" --arg checked "$checked" \
+              'with_entries(if (.key | split("/")[0]) == $provider then .value = {"ok": false, "checked": $checked} else . end)')
+          else
+            new_cache=$(echo "$cache_json" | jq --arg model "$MODEL" --arg checked "$checked" \
+              '. + {($model): {"ok": false, "checked": $checked}}')
+          fi
           gh issue edit "$CACHE_ISSUE" -R "$ISSUE_REPOSITORY" --body "$new_cache" || true
 
       - name: Dump debug output
