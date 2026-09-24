@@ -452,29 +452,6 @@ jobs:
             fi
           fi
 
-      - name: Emit loop-termination metrics
-        if: always()
-        id: loop-metrics
-        shell: bash
-        env:
-          LOOP_STEPS: "${{ steps.coordinator.outputs.steps || '0' }}"
-          LOOP_PROGRESS_DELTA: "${{ steps.coordinator.outputs.progress_delta || '1' }}"
-          LOOP_FAILURE_MODE: "${{ steps.coordinator.outputs.failure_mode || 'unknown' }}"
-          LOOP_TOKEN_ESTIMATE: "${{ steps.coordinator.outputs.token_estimate || '' }}"
-        run: |
-          set -Eeuo pipefail
-          python3 -c '
-          import json, os, sys
-          metrics = {
-            "steps": int(os.environ.get("LOOP_STEPS", "0")),
-            "progress_delta": float(os.environ.get("LOOP_PROGRESS_DELTA", "1")),
-            "failure_mode": os.environ.get("LOOP_FAILURE_MODE", "unknown"),
-            "token_estimate": os.environ.get("LOOP_TOKEN_ESTIMATE", ""),
-          }
-          with open("loop-metrics.json", "w") as f:
-            json.dump(metrics, f)
-          ' || true
-
       - name: Post run-result comment
         if: always() && steps.target-issue.outputs.issue_number != ''
         continue-on-error: true
