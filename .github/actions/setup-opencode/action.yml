@@ -29,6 +29,7 @@ runs:
         printf '::add-mask::%s\n' "$GITHUB_TOKEN"
         printf '::add-mask::%s\n' "${VSHN_US_AI_API_KEY:-}"
         printf '::add-mask::%s\n' "${VSHN_US_AI_BASE_URL:-}"
+        printf '::add-mask::%s\n' "${BRAVE_API_KEY:-}"
         source_dir="$RUNNER_TEMP/provision-machines"
         config_dir="$RUNNER_TEMP/opencode-config"
         mapfile -t tags < <(git ls-remote --tags "$SOURCE_REPOSITORY" \
