@@ -12,9 +12,7 @@ on:
 
 permissions:
   actions: write
-  artifact-metadata: write
   checks: read
-  packages: write
   contents: write
   issues: write
   pull-requests: write
@@ -221,9 +219,7 @@ jobs:
     if: needs.select.outputs.prompt != ''
     permissions:
       actions: write
-      artifact-metadata: write
       checks: read
-      packages: write
       contents: write
       issues: write
       pull-requests: write
