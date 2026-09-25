@@ -194,7 +194,8 @@ class TestMain:
         assert dump_subagent_transcripts.main() == 0
         out = capsys.readouterr().out
         assert "--- Inline agent segment: Build Agent" in out
-        assert "complete" in out
+        inline_output = out.split("--- Inline agent segment: Build Agent", 1)[1]
+        assert "[Build Agent] [Build Agent] complete" in inline_output
         assert "(No subagents were spawned.)" not in out
 
     def test_renders_child_transcripts_fenced(self, monkeypatch, capsys):
