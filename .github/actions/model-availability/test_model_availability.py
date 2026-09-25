@@ -1,8 +1,10 @@
 import json
 import types
 from datetime import datetime, timezone
+from pathlib import Path
 
 import model_availability
+import pytest
 
 
 CONFIG = {
@@ -10,13 +12,27 @@ CONFIG = {
         "vshn-us-ai": {"options": {"baseURL": "https://vshn.example.com/v1"}},
     }
 }
+PIPE_STDOUT_LIMIT = 65_536
+
+
+def fake_debug_config(config, kwargs):
+    output = json.dumps(config)
+    if "stdout" in kwargs:
+        kwargs["stdout"].write(output)
+        kwargs["stdout"].flush()
+        return types.SimpleNamespace(stdout="")
+    return types.SimpleNamespace(
+        stdout=output.encode("utf-8")[:PIPE_STDOUT_LIMIT].decode(
+            "utf-8", errors="ignore"
+        )
+    )
 
 
 def fake_run(args, *a, **kw):
     if args == ["opencode", "models"]:
         return types.SimpleNamespace(stdout="opencode/a-free\n")
     if args == ["opencode", "debug", "config"]:
-        return types.SimpleNamespace(stdout=json.dumps(CONFIG))
+        return fake_debug_config(CONFIG, kw)
     raise AssertionError(f"unexpected args: {args}")
 
 
@@ -86,7 +102,7 @@ class TestDiscoverModels:
             if args == ["opencode", "models"]:
                 return types.SimpleNamespace(stdout="opencode/a-free\n")
             if args == ["opencode", "debug", "config"]:
-                return types.SimpleNamespace(stdout=json.dumps(config))
+                return fake_debug_config(config, kw)
             raise AssertionError(f"unexpected args: {args}")
 
         monkeypatch.setattr(
@@ -335,21 +351,53 @@ class TestLoadProviderBaseUrls:
                 "no-base-url": {"options": {}},
             }
         }
-        monkeypatch.setattr(
-            model_availability.subprocess,
-            "run",
-            lambda *args, **kwargs: types.SimpleNamespace(stdout=json.dumps(config)),
-        )
+        temp_files = []
+
+        def fake_run(*args, **kwargs):
+            if "stdout" in kwargs:
+                temp_files.append(kwargs["stdout"])
+            return fake_debug_config(config, kwargs)
+
+        monkeypatch.setattr(model_availability.subprocess, "run", fake_run)
+        assert model_availability.load_provider_base_urls() == {
+            "vshn-us-ai": "https://vshn.example.com/v1",
+        }
+        assert temp_files[0].closed
+        assert not Path(temp_files[0].name).exists()
+
+    def test_reads_output_larger_than_pipe_limit(self, monkeypatch):
+        config = {
+            "provider": {
+                "vshn-us-ai": {"options": {"baseURL": "https://vshn.example.com/v1"}},
+            },
+            "padding": "x" * PIPE_STDOUT_LIMIT,
+        }
+        payload = json.dumps(config)
+        assert len(payload.encode("utf-8")) > PIPE_STDOUT_LIMIT
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(payload.encode("utf-8")[:PIPE_STDOUT_LIMIT].decode("utf-8"))
+
+        def fake_run(args, **kwargs):
+            assert args == ["opencode", "debug", "config"]
+            return fake_debug_config(config, kwargs)
+
+        monkeypatch.setattr(model_availability.subprocess, "run", fake_run)
         assert model_availability.load_provider_base_urls() == {
             "vshn-us-ai": "https://vshn.example.com/v1",
         }
 
     def test_returns_empty_on_failure(self, monkeypatch):
-        def fail(*args, **kwargs):
+        temp_files = []
+
+        def fail(args, **kwargs):
+            if args == ["opencode", "debug", "config"] and "stdout" in kwargs:
+                temp_files.append(kwargs["stdout"])
             raise RuntimeError("opencode failed")
 
         monkeypatch.setattr(model_availability.subprocess, "run", fail)
         assert model_availability.load_provider_base_urls() == {}
+        assert temp_files[0].closed
+        assert not Path(temp_files[0].name).exists()
 
 
 class TestProbeModelLogging:
@@ -401,7 +449,7 @@ class TestDiscoverModelsLogging:
                     stdout="opencode/a-free\nopencode/big-pickle\n", stderr=""
                 )
             if args == ["opencode", "debug", "config"]:
-                return types.SimpleNamespace(stdout=json.dumps(CONFIG))
+                return fake_debug_config(CONFIG, kw)
             raise AssertionError(f"unexpected args: {args}")
 
         monkeypatch.setattr(model_availability.subprocess, "run", fake_run_logging)
