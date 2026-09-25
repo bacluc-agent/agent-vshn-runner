@@ -463,7 +463,7 @@ jobs:
           LOOP_TOKEN_ESTIMATE: "${{ steps.coordinator.outputs.token_estimate || '' }}"
         run: |
           set -Eeuo pipefail
-          python3 scripts/loop_metrics.py
+          python3 scripts/loop_metrics.py || true
 
       - name: Post run-result comment
         if: always() && steps.target-issue.outputs.issue_number != ''
