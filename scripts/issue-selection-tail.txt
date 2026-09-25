@@ -4,3 +4,9 @@ Deprioritize issues that only touch this meta-repo's own docs sources. Standing 
 starve other issues. Reply with ONLY the
 final implementation prompt for the chosen issue: a self-contained instruction for a coding agent
 that names the chosen issue number and how to implement it.
+Candidates with an already-open PR or an already-landed change must not get a "create new PR" prompt.
+Prefer unclaimed issues.
+When picking an issue with an open PR, the prompt must name that PR URL and instruct to address review feedback on it.
+A `[PR ...(<state>)]` annotation is a hint to verify, not proof.
+Never emit a "create a new PR" prompt for a candidate with an OPEN PR — name that PR URL and tell the agent to address its review feedback.
+For a MERGED annotation, verify on `main` with `gh api repos/<repo>/contents/<path>` and, if the change is present, do not select the issue and state in the reply that issue <n> should be closed as already implemented (never close it yourself).
