@@ -207,5 +207,6 @@ Repository secrets:
 
 - `BACLUC_AGENT_GITHUB_TOKEN`: PAT with access to the issue repository
 - `VSHN_US_AI_API_KEY`: API key for the vshn-us-ai provider
+- `BRAVE_API_KEY`: API key for the Brave Search MCP server (optional)
 
 The OpenCode CLI version is pinned in `.github/actions/setup-opencode/action.yml` and updated by Renovate.
