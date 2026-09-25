@@ -148,7 +148,14 @@ class TestMain:
                 return sessions
             return json.dumps(root_export)
 
+        def fake_run_opencode_to_file(*args, path: str):
+            with open(path, "w") as f:
+                f.write(fake_run_opencode(*args))
+
         monkeypatch.setattr(dump_subagent_transcripts, "run_opencode", fake_run_opencode)
+        monkeypatch.setattr(
+            dump_subagent_transcripts, "run_opencode_to_file", fake_run_opencode_to_file
+        )
         assert dump_subagent_transcripts.main() == 0
         out_lines = capsys.readouterr().out.splitlines()
         assert re.fullmatch(r"::stop-commands::[0-9a-f]{64}", out_lines[0])
@@ -157,6 +164,39 @@ class TestMain:
         assert "--- Coordinator transcript: coordinator (ses_root) ---" in out_lines
         assert "[coordinator] all by myself" in out_lines
         assert "(No subagents were spawned.)" in out_lines
+
+    def test_renders_inline_agent_without_child_metadata(self, monkeypatch, capsys):
+        monkeypatch.setenv("COORDINATOR_SESSION_TITLE", "coordinator-run")
+        sessions = json.dumps([{"id": "ses_root", "title": "coordinator-run"}])
+        root_export = {
+            "info": {"agent": "coordinator"},
+            "messages": [
+                {"parts": [{"type": "text", "text": "[Build Agent] complete"}]}
+            ],
+        }
+
+        def fake_run_opencode(*args):
+            if args[0] == "session":
+                return sessions
+            return json.dumps(root_export)
+
+        def fake_run_opencode_to_file(*args, path: str):
+            with open(path, "w") as f:
+                f.write(fake_run_opencode(*args))
+
+        monkeypatch.setattr(dump_subagent_transcripts, "run_opencode", fake_run_opencode)
+        monkeypatch.setattr(
+            dump_subagent_transcripts,
+            "run_opencode_to_file",
+            fake_run_opencode_to_file,
+            raising=False,
+        )
+        assert dump_subagent_transcripts.main() == 0
+        out = capsys.readouterr().out
+        assert "--- Inline agent segment: Build Agent" in out
+        inline_output = out.split("--- Inline agent segment: Build Agent", 1)[1]
+        assert "[Build Agent] [Build Agent] complete" in inline_output
+        assert "(No subagents were spawned.)" not in out
 
     def test_renders_child_transcripts_fenced(self, monkeypatch, capsys):
         monkeypatch.setenv("COORDINATOR_SESSION_TITLE", "coordinator-run")
@@ -219,7 +259,14 @@ class TestMain:
                 return sessions
             return json.dumps(exports[args[1]])
 
+        def fake_run_opencode_to_file(*args, path: str):
+            with open(path, "w") as f:
+                f.write(fake_run_opencode(*args))
+
         monkeypatch.setattr(dump_subagent_transcripts, "run_opencode", fake_run_opencode)
+        monkeypatch.setattr(
+            dump_subagent_transcripts, "run_opencode_to_file", fake_run_opencode_to_file
+        )
         assert dump_subagent_transcripts.main() == 0
         out = capsys.readouterr().out
         out_lines = out.splitlines()
@@ -248,7 +295,13 @@ class TestMain:
                 return sessions
             raise subprocess.CalledProcessError(1, args)
 
+        def fake_run_opencode_to_file(*args, path: str):
+            raise subprocess.CalledProcessError(1, args)
+
         monkeypatch.setattr(dump_subagent_transcripts, "run_opencode", fake_run_opencode)
+        monkeypatch.setattr(
+            dump_subagent_transcripts, "run_opencode_to_file", fake_run_opencode_to_file
+        )
         assert dump_subagent_transcripts.main() == 0
         out_lines = capsys.readouterr().out.splitlines()
         assert re.fullmatch(r"::stop-commands::[0-9a-f]{64}", out_lines[0])
