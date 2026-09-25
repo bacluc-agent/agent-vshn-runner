@@ -20,6 +20,10 @@ check() {
 
 check 'formatting (prettier --check .)' docker run --rm "${mount[@]}" ghcr.io/bacluc/prettier-image/prettier-image:3.9.4 --check .
 check 'actionlint (workflows + used actions)' docker run --rm "${mount[@]}" rhysd/actionlint:1.7.12 -color
+if [[ ! -d .opencode/node_modules/@opencode-ai/plugin ]]; then
+  check 'opencode node dependencies (npm install)' npm install --prefix .opencode
+fi
+check 'opencode tool tests (node --test)' node --test ".opencode/tool/*.test.mjs"
 check 'pytest (python tests)' uv run --group dev pytest -q .github/actions/model-availability scripts
 
 exit "$status"

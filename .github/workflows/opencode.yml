@@ -452,6 +452,19 @@ jobs:
             fi
           fi
 
+      - name: Emit loop-termination metrics
+        if: always()
+        id: loop-metrics
+        shell: bash
+        env:
+          LOOP_STEPS: "${{ steps.coordinator.outputs.steps || '0' }}"
+          LOOP_PROGRESS_DELTA: "${{ steps.coordinator.outputs.progress_delta || '1' }}"
+          LOOP_FAILURE_MODE: "${{ steps.coordinator.outputs.failure_mode || 'unknown' }}"
+          LOOP_TOKEN_ESTIMATE: "${{ steps.coordinator.outputs.token_estimate || '' }}"
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/loop_metrics.py
+
       - name: Post run-result comment
         if: always() && steps.target-issue.outputs.issue_number != ''
         continue-on-error: true
