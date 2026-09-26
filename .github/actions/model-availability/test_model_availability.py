@@ -309,7 +309,7 @@ class TestWriteCache:
             ("issue", "edit", "3", "-R", "bacluc-agent/agent-vshn-todo", "--body", '{"a": 1}')
         ]
 
-    def test_swallows_failure(self, monkeypatch):
+    def test_warns_on_failure(self, monkeypatch, capsys):
         monkeypatch.setenv("ISSUE_REPOSITORY", "bacluc-agent/agent-vshn-todo")
 
         def fail(*args):
@@ -317,6 +317,18 @@ class TestWriteCache:
 
         monkeypatch.setattr(model_availability, "run_gh", fail)
         model_availability.write_cache("3", {"a": 1})
+        assert "failed to write cache issue 3" in capsys.readouterr().err
+
+    def test_skips_oversized_body(self, monkeypatch, capsys):
+        monkeypatch.setenv("ISSUE_REPOSITORY", "bacluc-agent/agent-vshn-todo")
+        # record only the body size, so a failure here does not dump 70 KB
+        sizes = []
+        monkeypatch.setattr(
+            model_availability, "run_gh", lambda *args: sizes.append(len(args[-1]))
+        )
+        model_availability.write_cache("3", {"k": "x" * 70_000})
+        assert sizes == []
+        assert "exceeding" in capsys.readouterr().err
 
 
 class TestModelsEndpointFor:
@@ -429,6 +441,20 @@ class TestProbeModelLogging:
         assert model_availability.probe_model("opencode/a-free", str(tmp_path)) is False
         log = tmp_path / "model-probes" / "probe-opencode-a-free.log"
         assert log.read_text() == "model unavailable\n"
+
+    def test_writes_probe_log_on_timeout(self, tmp_path, monkeypatch):
+        def raise_timeout(*args, **kwargs):
+            raise model_availability.subprocess.TimeoutExpired(
+                cmd="opencode", timeout=7
+            )
+
+        monkeypatch.setattr(model_availability.subprocess, "run", raise_timeout)
+        assert (
+            model_availability.probe_model("opencode/a-free", str(tmp_path), timeout=7)
+            is False
+        )
+        log = tmp_path / "model-probes" / "probe-opencode-a-free.log"
+        assert log.read_text() == "TIMEOUT after 7s\n"
 
 
 class TestDiscoverModelsLogging:
