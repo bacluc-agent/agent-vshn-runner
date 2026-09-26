@@ -118,8 +118,8 @@ jobs:
             fi
             printf '\n\n\n\n\n\n'
 
-            title="$(gh issue view "$number" --json title --jq '.title' -R "$ISSUE_REPOSITORY")"
-            body="$(gh issue view "$number" --json body --jq '.body' -R "$ISSUE_REPOSITORY")"
+            title="$(gh issue view "$number" --json title --jq '.title' -R "$ISSUE_REPOSITORY")" || { printf '::warning::skip %s: view title failed\n' "$number" >&2; (( failed++ )) || true; continue; }
+            body="$(gh issue view "$number" --json body --jq '.body' -R "$ISSUE_REPOSITORY")" || { printf '::warning::skip %s: view body failed\n' "$number" >&2; (( failed++ )) || true; continue; }
 
             prompt="$RUNNER_TEMP/refine-prompt.txt"
             {
