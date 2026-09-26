@@ -30,7 +30,9 @@ jobs:
 
       - name: Check model availability
         id: model-availability
-        timeout-minutes: 10
+        # ponytail: 20 min, not upstream's 10 — local PROBE_TIMEOUT_SECONDS is 60s (upstream 30s),
+        # so 65 candidates / 5 concurrent = 13 waves = ~13 min worst case; raise if the step outgrows it.
+        timeout-minutes: 20
         uses: ./.github/actions/model-availability
 
       - name: Refine issues
