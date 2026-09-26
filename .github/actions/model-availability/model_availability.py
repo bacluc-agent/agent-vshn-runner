@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 AVAILABLE_TTL_HOURS = 24
 FAILED_TTL_HOURS = 2
+GITHUB_ISSUE_BODY_LIMIT = 65536
 PROVIDERS = (
     ("vshn-us-ai", "VSHN_US_AI_API_KEY"),
 )
@@ -63,10 +64,19 @@ def read_cache(cache_issue: str) -> dict:
 
 
 def write_cache(cache_issue: str, cache: dict) -> None:
+    body = json.dumps(cache)
+    size = len(body.encode("utf-8"))
+    if size > GITHUB_ISSUE_BODY_LIMIT:
+        print(
+            f"warning: cache body is {size} bytes, exceeding the "
+            f"{GITHUB_ISSUE_BODY_LIMIT}-byte GitHub issue limit; cache not updated",
+            file=sys.stderr,
+        )
+        return
     try:
-        run_gh("issue", "edit", cache_issue, "-R", issue_repo(), "--body", json.dumps(cache))
-    except Exception:
-        pass
+        run_gh("issue", "edit", cache_issue, "-R", issue_repo(), "--body", body)
+    except Exception as e:
+        print(f"warning: failed to write cache issue {cache_issue}: {e}", file=sys.stderr)
 
 
 def parse_free_models(opencode_models_output: str) -> list[str]:
@@ -193,11 +203,21 @@ def is_cache_fresh(entry, now: datetime) -> bool:
     return (now - checked).total_seconds() < ttl_hours * 3600
 
 
+def _write_probe_log(log_path: str, content: str) -> None:
+    try:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "w") as handle:
+            handle.write(content)
+    except OSError:
+        pass
+
+
 def probe_model(
     candidate: str, work_dir: str, timeout: int = PROBE_TIMEOUT_SECONDS
 ) -> bool:
     probe_dir = os.path.join(work_dir, "probe-" + candidate.replace("/", "-"))
     os.makedirs(probe_dir, exist_ok=True)
+    log_path = os.path.join(work_dir, "model-probes", "probe-" + candidate.replace("/", "-") + ".log")
     try:
         result = subprocess.run(
             [
@@ -215,17 +235,9 @@ def probe_model(
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
+        _write_probe_log(log_path, f"TIMEOUT after {timeout}s\n")
         return False
-    log_dir = os.path.join(work_dir, "model-probes")
-    try:
-        os.makedirs(log_dir, exist_ok=True)
-        with open(
-            os.path.join(log_dir, "probe-" + candidate.replace("/", "-") + ".log"), "w"
-        ) as handle:
-            handle.write(result.stdout)
-            handle.write(result.stderr)
-    except OSError:
-        pass
+    _write_probe_log(log_path, result.stdout + result.stderr)
     text = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", result.stdout)
     return result.returncode == 0 and re.fullmatch(r"\s*OK\.?\s*", text) is not None
 
