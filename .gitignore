@@ -3,4 +3,5 @@
 __pycache__/
 loop-metrics.json
 .opencode/node_modules/
+.opencode/package-lock.json
 uv.lock

@@ -131,21 +131,24 @@ jobs:
           printf '\n\n\n\n\n\n'
 
           fallback_model=''
-          # Allowed coordinator models, cheapest first. vshn-us-ai/subscription.qwen3.8-max is
-          # deliberately absent: it burns disproportionate tokens, so it is never auto-selected.
-          # An explicit model / model_choice input is still honoured unchanged (see below).
+          # Allowed coordinator models, cheapest first: free OpenCode models before paid
+          # subscription models, and *-flash before the rest. vshn-us-ai/subscription.qwen3.8-max
+          # is deliberately absent: it burns disproportionate tokens, so it is never
+          # auto-selected. An explicit model / model_choice input is still honoured unchanged.
           # ponytail: token cost is not derivable from a model id; add a model here when it is
           # observed to burn; upgrade path is per-model cost metadata from the provider API.
-          cheap_models=(
-            'vshn-us-ai/subscription.qwen3.8-flash'
-            'vshn-us-ai/subscription.glm-5.2'
-            'vshn-us-ai/subscription.glm-5.3-flash'
-            'opencode/big-pickle'
-          )
           # Exclude known-weak free models (ling-3.0-flash-fin-free, mimo-v2.5-free, nemotron-*):
-          # they pass the trivial OK probe but fail as coordinator in 10+ runs.
-          mapfile -t free_models < <(grep -E '^opencode/[^[:space:]]+-free$' "$available_models_file" | grep -Ev '/(ling-3\.0-flash-fin|mimo-v2\.5)-free$|/nemotron-' | awk '!seen[$0]++')
-          cheap_models+=("${free_models[@]}")
+          # they pass the trivial OK probe but fail as coordinator in 10+ runs. The same filter
+          # caps the last-resort pick below, so a weak model can never win there either.
+          weak_free_re='/(ling-3\.0-flash-fin|mimo-v2\.5)-free$|/nemotron-'
+          mapfile -t free_models < <(grep -E '^opencode/[^[:space:]]+-free$' "$available_models_file" | grep -Ev "$weak_free_re" | awk '!seen[$0]++')
+          cheap_models=(
+            'opencode/big-pickle'
+            "${free_models[@]}"
+            'vshn-us-ai/subscription.qwen3.8-flash'
+            'vshn-us-ai/subscription.glm-5.3-flash'
+            'vshn-us-ai/subscription.glm-5.2'
+          )
           allowed_models_file="$RUNNER_TEMP/allowed-models.txt"
           : > "$allowed_models_file"
           for candidate in "${cheap_models[@]}"; do
@@ -163,7 +166,9 @@ jobs:
             if [[ -z "$fallback_model" ]]; then fallback_model="$candidate"; fi
           done
           if [[ -z "$fallback_model" ]]; then
-            fallback_model="$(awk 'NF { print; exit }' "$available_models_file")"
+            # Last resort is capped at the paid flash tier and reuses the weak-free-model
+            # exclusion, so neither a heavy nor a known-weak model can be selected here.
+            fallback_model="$(grep -Ev "$weak_free_re" "$available_models_file" | grep -E -- '-flash$' | awk 'NF { print; exit }' || true)"
             if [[ -n "$fallback_model" ]]; then
               printf '::warning::no allowed coordinator model is available; using last-resort model: %s\n' "$fallback_model"
             fi
