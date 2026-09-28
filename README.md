@@ -111,6 +111,7 @@ The work is done by OpenCode agents defined in the OpenCode configuration pulled
 Before each run the `.github/actions/model-availability` action checks which AI models are currently reachable.
 
 - Free models are listed first in the availability output and are preferred when no specific model is requested.
+- The coordinator is only auto-assigned a model from the cheap list; `vshn-us-ai/subscription.qwen3.8-max` is never selected automatically and is only used when it is passed explicitly as `model` or `model_choice`.
 - Results are cached in a GitHub issue titled **"model-discovery cache"** inside `agent-vshn-todo`.
 - A model that passed its last check is trusted for 24 hours.
 - A model that failed is retried after 2 hours.
