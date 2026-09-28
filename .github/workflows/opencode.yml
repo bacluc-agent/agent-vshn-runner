@@ -140,8 +140,6 @@ jobs:
             'vshn-us-ai/subscription.qwen3.8-flash'
             'vshn-us-ai/subscription.glm-5.2'
             'vshn-us-ai/subscription.glm-5.3-flash'
-            'vshn-us-ai/subscription.kimi-k3'
-            'vshn-us-ai/subscription.deepseek-v4-pro'
             'opencode/big-pickle'
           )
           # Exclude known-weak free models (ling-3.0-flash-fin-free, mimo-v2.5-free, nemotron-*):
