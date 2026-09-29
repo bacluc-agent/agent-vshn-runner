@@ -168,7 +168,14 @@ jobs:
           if [[ -z "$fallback_model" ]]; then
             # Last resort is capped at the paid flash tier and reuses the weak-free-model
             # exclusion, so neither a heavy nor a known-weak model can be selected here.
-            fallback_model="$(grep -Ev "$weak_free_re" "$available_models_file" | grep -E -- '-flash$' | awk 'NF { print; exit }' || true)"
+            # Without VSHN_US_AI_API_KEY every paid model is dropped, matching the
+            # allow-list arm above, so a free but unusable model is never picked.
+            if [[ -n "${VSHN_US_AI_API_KEY:-}" ]]; then
+              last_resort_re="$weak_free_re"
+            else
+              last_resort_re="$weak_free_re|^(vshn-us-ai/)"
+            fi
+            fallback_model="$(grep -Ev "$last_resort_re" "$available_models_file" | grep -E -- '-flash$' | awk 'NF { print; exit }' || true)"
             if [[ -n "$fallback_model" ]]; then
               printf '::warning::no allowed coordinator model is available; using last-resort model: %s\n' "$fallback_model"
             fi
