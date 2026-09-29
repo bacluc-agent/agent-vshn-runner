@@ -30,11 +30,10 @@ on:
           - vshn-us-ai/subscription.kimi-k3
           - vshn-us-ai/subscription.deepseek-v4-pro
           - opencode/big-pickle
+          - opencode/longcat-2.5-preview-free
+          - opencode/mimo-v2.6-flash-free
           - opencode/muse-spark-1.3-contributor-free
-          - opencode/mimo-v2.5-free
-          - opencode/nemotron-3-ultra-free
-          - opencode/nemotron-3.5-lightning-free
-          - opencode/ling-3.0-flash-fin-free
+          - opencode/space-bunny-free
   workflow_call:
     inputs:
       prompt:
@@ -131,8 +130,8 @@ jobs:
           printf '\n\n\n\n\n\n'
 
           fallback_model=''
-          # Allowed coordinator models, cheapest first: free OpenCode models before paid
-          # subscription models, and *-flash before the rest. vshn-us-ai/subscription.qwen3.8-max
+          # Allowed coordinator models, cheapest first: opencode/big-pickle is pinned first so it
+          # wins whenever available, then the discovered non-weak opencode/*-free ids, then the paid flash-tier models. vshn-us-ai/subscription.qwen3.8-max
           # is deliberately absent: it burns disproportionate tokens, so it is never
           # auto-selected. An explicit model / model_choice input is still honoured unchanged.
           # ponytail: token cost is not derivable from a model id; add a model here when it is
@@ -165,6 +164,7 @@ jobs:
             printf '%s\n' "$candidate" >> "$allowed_models_file"
             if [[ -z "$fallback_model" ]]; then fallback_model="$candidate"; fi
           done
+          printf 'Allowed coordinator models (%s):\n' "$(wc -l < "$allowed_models_file")"; cat "$allowed_models_file"
           if [[ -z "$fallback_model" ]]; then
             # Last resort is capped at the paid flash tier and reuses the weak-free-model
             # exclusion, so neither a heavy nor a known-weak model can be selected here.
