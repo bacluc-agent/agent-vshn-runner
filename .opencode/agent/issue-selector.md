@@ -50,7 +50,7 @@ Classify each candidate by its PR state:
 - Merged or closed PR: a prior attempt. Acknowledge the past work and re-implement or improve it if the issue is still open.
 - No PR found: untried.
 
-Known limitation: a PR whose branch and title never mention `issue-<n>` can be missed: "no PR found" means none was found, not that none exists. Handle this with at most ONE extra lookup against repositories referenced in the issue body (upstream or other repos), folded into the shortlist phase — never against the issue repository itself for PRs. Also note: `$ISSUE_REPOSITORY` is the issue repository (where issues live); agent PRs live in the code repository, so do not query `$ISSUE_REPOSITORY` for PRs.
+Known limitation: a PR whose branch and title never mention `issue-<n>` can be missed: "no PR found" means none was found, not that none exists. Handle this with at most ONE extra lookup against repositories referenced in the issue body (upstream or other repos), folded into the shortlist phase — never against `$ISSUE_REPOSITORY` itself for PRs (it holds the issues; agent PRs live in the code repository).
 
 ## Handling Review Feedback
 
@@ -66,7 +66,6 @@ Compute recently selected issues yourself from the runner repo's PR history — 
 headRefNames your discovery command already returned (e.g. `grep -oE 'issue-[0-9]+'`), and avoid re-picking
 them unless every other candidate is infeasible.
 Pick standing never-close meta tasks at most 1 in 4 runs.
-Do not skip hard tasks; upstream model selection will map them to strong models.
 
 ## Breadth-first selection
 
