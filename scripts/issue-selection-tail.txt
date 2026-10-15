@@ -7,3 +7,5 @@ that names the chosen issue number and how to implement it.
 Name the chosen issue with its full URL (https://github.com/<owner>/<repo>/issues/<n>).
 Each candidate line already carries labels, creation date, comment count, PR status (pr=), last-human-feedback (last-human=), and a body excerpt: decide from that metadata and do not re-query it.
 Hard budget: at most 6 tool calls total, target zero. Never fetch PR diffs, commits, file contents, upstream source, or repository trees. At most ONE lookup for the likely pick. Emit the final prompt immediately; do not re-verify.
+Breadth-first: shortlist 2-3 candidates from the metadata first, then analyze only those further; do not deep-dive a single issue before shortlisting.
+Time awareness: you are under a hard 10-minute cap. If time is running out, make a decision with what you have — a bad decision is better than no decision. Never let the run end without emitting a selection.

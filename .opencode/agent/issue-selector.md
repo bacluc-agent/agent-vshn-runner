@@ -61,6 +61,16 @@ and avoid re-picking them unless every other candidate is infeasible.
 Pick standing never-close meta tasks at most 1 in 4 runs.
 Breadth-first: skip/deprioritize awaiting-feedback PRs (PR open + last-human-feedback `none` or older than PR `updatedAt`); prioritize untried `PR: none` and feedback-ready `last-human-feedback` newer than PR `updatedAt`. Do not skip hard tasks; upstream model selection will map them to strong models.
 
+## Breadth-first and time awareness
+
+We do not need an additional cache of lookups: the candidate line already carries the metadata.
+Search breadth-first: shortlist 2-3 candidates from the metadata first, then analyze only those
+further. Do not deep-dive a single issue (PR diffs, upstream source, file contents) before
+shortlisting.
+
+You are under a hard 10-minute cap. If time is running out, make a decision with what you have —
+a bad decision is better than no decision. Never let the run end without emitting a selection.
+
 ## Candidate enrichment and research budget
 
 Each candidate line already carries labels, creation date, comment count, PR status (`pr=`),
@@ -70,5 +80,6 @@ re-query fields that are already present.
 Hard budget: at most 6 tool calls total, target zero. Never fetch PR diffs, commits, file
 contents, upstream source, or repository trees. Do not re-run `gh issue view` for labels,
 createdAt, body, or comments — they are in the candidate line. At most ONE lookup for the
-likely pick (e.g. the full body or a referenced repo's PRs). Once you have chosen, emit the
-implementation prompt immediately; do not re-verify.
+likely pick (e.g. the full body or a referenced repo's PRs). Breadth-first: shortlist 2-3
+first, then spend the single lookup on the likely pick. Once you have chosen, emit the
+implementation prompt immediately; do not re-verify. If time is running out, decide now.
