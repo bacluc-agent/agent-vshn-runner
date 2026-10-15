@@ -62,9 +62,9 @@ Always push changes to a branch so work is not lost, and record the branch name 
 ## Diversity and anti-repeat
 
 Rotate areas and target-repos: do not repeat the area or target-repo of the last 2 picks.
-Compute recently selected issues yourself from the runner repo's PR history, e.g.
-`gh pr list -R bacluc-agent/agent-vshn-runner --state all --limit 30 --json headRefName --jq '.[].headRefName' | grep -oE 'issue-[0-9]+'`,
-and avoid re-picking them unless every other candidate is infeasible.
+Compute recently selected issues yourself from the runner repo's PR history — extract them from the
+headRefNames your discovery command already returned (e.g. `grep -oE 'issue-[0-9]+'`), and avoid re-picking
+them unless every other candidate is infeasible.
 Pick standing never-close meta tasks at most 1 in 4 runs.
 
 ## Breadth-first selection
