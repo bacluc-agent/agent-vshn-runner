@@ -688,3 +688,25 @@ class TestMainReReadsCache:
         )
         assert model_availability.main() == 0
         assert "model-a" in captured
+
+    def test_cas_giving_up_falls_back_to_local_merge(self, monkeypatch):
+        monkeypatch.setattr(model_availability, "resolve_cache_issue", lambda: "3")
+        monkeypatch.setattr(
+            model_availability,
+            "read_cache",
+            lambda issue: {"model-a": {"ok": True, "checked": "2026-09-12T00:00:00Z"}},
+        )
+        monkeypatch.setattr(model_availability, "discover_models", lambda: ([], {}))
+        monkeypatch.setattr(
+            model_availability, "probe_candidates", lambda c, w: {"model-b": True}
+        )
+        monkeypatch.setattr(model_availability, "update_cache", lambda issue, mutate: None)
+        captured = {}
+        monkeypatch.setattr(
+            model_availability,
+            "write_outputs",
+            lambda cache, available, issue: captured.update(cache),
+        )
+        assert model_availability.main() == 0
+        assert "model-a" in captured
+        assert captured["model-b"]["ok"] is True
