@@ -213,6 +213,18 @@ class TestIsCacheFresh:
         assert not model_availability.is_cache_fresh({"ok": "yes"}, now)
         assert not model_availability.is_cache_fresh({"ok": True}, now)
 
+    def test_timeout_fresh_within_one_hour(self):
+        now = datetime(2026, 9, 6, 12, 0, tzinfo=timezone.utc)
+        entry = {"ok": False, "reason": "timeout", "checked": "2026-09-06T11:30:00Z"}
+        assert model_availability.is_cache_fresh(entry, now)
+
+    def test_timeout_stale_after_one_hour(self):
+        now = datetime(2026, 9, 6, 13, 30, tzinfo=timezone.utc)
+        timeout = {"ok": False, "reason": "timeout", "checked": "2026-09-06T12:00:00Z"}
+        failed = {"ok": False, "checked": "2026-09-06T12:00:00Z"}
+        assert not model_availability.is_cache_fresh(timeout, now)
+        assert model_availability.is_cache_fresh(failed, now)
+
 
 class TestMergeResults:
     def test_merges_and_overwrites(self):
@@ -221,6 +233,17 @@ class TestMergeResults:
         assert model_availability.merge_results(cache, results, "2026-09-06T12:00:00Z") == {
             "opencode/a-free": {"ok": False, "checked": "2026-09-06T12:00:00Z"},
             "vshn-us-ai/glm-5.2": {"ok": True, "checked": "2026-09-06T12:00:00Z"},
+        }
+
+    def test_timeout_result_records_reason(self):
+        cache = {"opencode/a-free": {"ok": True, "checked": "old"}}
+        merged = model_availability.merge_results(
+            cache, {"opencode/a-free": None}, "2026-09-06T12:00:00Z"
+        )
+        assert merged["opencode/a-free"] == {
+            "ok": False,
+            "reason": "timeout",
+            "checked": "2026-09-06T12:00:00Z",
         }
 
 
@@ -329,6 +352,159 @@ class TestWriteCache:
         model_availability.write_cache("3", {"k": "x" * 70_000})
         assert sizes == []
         assert "exceeding" in capsys.readouterr().err
+
+
+class TestUpdateCache:
+    def test_writes_when_body_unchanged(self, monkeypatch):
+        monkeypatch.setattr(
+            model_availability,
+            "read_cache_raw",
+            lambda issue: '{"a": {"ok": true, "checked": "old"}}',
+        )
+        written = []
+        monkeypatch.setattr(
+            model_availability, "write_cache", lambda issue, cache: written.append(cache)
+        )
+        merged = model_availability.update_cache(
+            "3", lambda c: {**c, "b": {"ok": True, "checked": "new"}}
+        )
+        assert merged == {
+            "a": {"ok": True, "checked": "old"},
+            "b": {"ok": True, "checked": "new"},
+        }
+        assert written == [merged]
+
+    def test_retries_on_concurrent_change(self, monkeypatch):
+        bodies = iter(
+            [
+                '{"a": {"ok": true, "checked": "old"}}',
+                '{"a": {"ok": true, "checked": "old"}, "concurrent": {"ok": true, "checked": "c"}}',
+                '{"a": {"ok": true, "checked": "old"}, "concurrent": {"ok": true, "checked": "c"}}',
+                '{"a": {"ok": true, "checked": "old"}, "concurrent": {"ok": true, "checked": "c"}}',
+            ]
+        )
+        monkeypatch.setattr(model_availability, "read_cache_raw", lambda issue: next(bodies))
+        written = []
+        monkeypatch.setattr(
+            model_availability, "write_cache", lambda issue, cache: written.append(cache)
+        )
+        merged = model_availability.update_cache(
+            "3", lambda c: {**c, "b": {"ok": True, "checked": "new"}}
+        )
+        assert merged["concurrent"] == {"ok": True, "checked": "c"}
+        assert written == [merged]
+
+    def test_gives_up_after_max_attempts(self, monkeypatch, capsys):
+        reads = {"count": 0}
+
+        def changing_read(issue):
+            reads["count"] += 1
+            return f'{{"v": {reads["count"]}}}'
+
+        monkeypatch.setattr(model_availability, "read_cache_raw", changing_read)
+        written = []
+        monkeypatch.setattr(
+            model_availability, "write_cache", lambda issue, cache: written.append(cache)
+        )
+        assert model_availability.update_cache("3", lambda c: c) is None
+        assert written == []
+        assert reads["count"] == model_availability.CAS_MAX_ATTEMPTS * 2
+        assert "cache issue 3 changed concurrently" in capsys.readouterr().err
+
+    def test_read_failure_skips_write(self, monkeypatch, capsys):
+        monkeypatch.setattr(model_availability, "read_cache_raw", lambda issue: None)
+        written = []
+        monkeypatch.setattr(
+            model_availability, "write_cache", lambda issue, cache: written.append(cache)
+        )
+        assert model_availability.update_cache("3", lambda c: c) is None
+        assert written == []
+        assert "could not read cache issue 3" in capsys.readouterr().err
+
+
+class TestMarkFailed:
+    def test_marks_single_model(self, monkeypatch):
+        captured = {}
+
+        def fake_update(issue, mutate):
+            merged = mutate(
+                {
+                    "a/x": {"ok": True, "checked": "old"},
+                    "b/y": {"ok": True, "checked": "old"},
+                }
+            )
+            captured.update(merged)
+            return merged
+
+        monkeypatch.setattr(model_availability, "update_cache", fake_update)
+        model_availability.mark_failed("3", model="opencode/a-free")
+        entry = captured["opencode/a-free"]
+        assert entry["ok"] is False
+        assert "reason" not in entry
+        datetime.fromisoformat(entry["checked"].replace("Z", "+00:00"))
+        assert captured["a/x"] == {"ok": True, "checked": "old"}
+
+    def test_marks_provider_wide(self, monkeypatch):
+        captured = {}
+
+        def fake_update(issue, mutate):
+            merged = mutate(
+                {
+                    "prov-1/a": {"ok": True, "checked": "old"},
+                    "prov-1/b": {"ok": True, "checked": "old"},
+                    "prov-10/c": {"ok": True, "checked": "old"},
+                    "prov-2/d": {"ok": True, "checked": "old"},
+                    "free-model": {"ok": True, "checked": "old"},
+                }
+            )
+            captured.update(merged)
+            return merged
+
+        monkeypatch.setattr(model_availability, "update_cache", fake_update)
+        model_availability.mark_failed("3", provider="prov-1")
+        assert captured["prov-1/a"]["ok"] is False
+        assert captured["prov-1/b"]["ok"] is False
+        assert captured["prov-10/c"] == {"ok": True, "checked": "old"}
+        assert captured["prov-2/d"] == {"ok": True, "checked": "old"}
+        assert captured["free-model"] == {"ok": True, "checked": "old"}
+
+
+class TestCli:
+    def test_mark_failed_model_uses_env_resolved_issue(self, monkeypatch):
+        monkeypatch.setenv("MODEL_AVAILABILITY_CACHE_ISSUE", "7")
+        calls = []
+        monkeypatch.setattr(
+            model_availability,
+            "mark_failed",
+            lambda issue, model=None, provider=None: calls.append((issue, model, provider)),
+        )
+        assert model_availability.cli(["--mark-failed", "--model", "opencode/a-free"]) == 0
+        assert calls == [("7", "opencode/a-free", None)]
+
+    def test_mark_failed_without_target_warns(self, monkeypatch, capsys):
+        monkeypatch.setenv("MODEL_AVAILABILITY_CACHE_ISSUE", "7")
+        monkeypatch.setattr(
+            model_availability,
+            "mark_failed",
+            lambda *a, **kw: pytest.fail("mark_failed should not be called"),
+        )
+        assert model_availability.cli(["--mark-failed"]) == 0
+        assert "--mark-failed requires" in capsys.readouterr().err
+
+    def test_no_cache_issue_resolved_warns_and_skips(self, monkeypatch, capsys):
+        monkeypatch.delenv("MODEL_AVAILABILITY_CACHE_ISSUE", raising=False)
+        monkeypatch.delenv("ISSUE_REPOSITORY", raising=False)
+        monkeypatch.setattr(
+            model_availability,
+            "mark_failed",
+            lambda *a, **kw: pytest.fail("mark_failed should not be called"),
+        )
+        assert model_availability.cli(["--mark-failed", "--model", "m"]) == 0
+        assert "no cache issue resolved" in capsys.readouterr().err
+
+    def test_no_args_runs_main(self, monkeypatch):
+        monkeypatch.setattr(model_availability, "main", lambda: 0)
+        assert model_availability.cli([]) == 0
 
 
 class TestModelsEndpointFor:
@@ -451,7 +627,7 @@ class TestProbeModelLogging:
         monkeypatch.setattr(model_availability.subprocess, "run", raise_timeout)
         assert (
             model_availability.probe_model("opencode/a-free", str(tmp_path), timeout=7)
-            is False
+            is None
         )
         log = tmp_path / "model-probes" / "probe-opencode-a-free.log"
         assert log.read_text() == "TIMEOUT after 7s\n"
@@ -495,19 +671,20 @@ class TestDiscoverModelsLogging:
 class TestMainReReadsCache:
     def test_reread_preserves_concurrent_updates(self, monkeypatch):
         monkeypatch.setattr(model_availability, "resolve_cache_issue", lambda: "3")
-        reads = iter(
-            [
-                {},
-                {"model-a": {"ok": True, "checked": "2026-09-12T00:00:00Z"}},
-            ]
-        )
-        monkeypatch.setattr(model_availability, "read_cache", lambda issue: next(reads))
+        monkeypatch.setattr(model_availability, "read_cache", lambda issue: {})
         monkeypatch.setattr(model_availability, "discover_models", lambda: ([], {}))
         monkeypatch.setattr(model_availability, "probe_candidates", lambda c, w: {})
-        written = {}
+        concurrent = {"model-a": {"ok": True, "checked": "2026-09-12T00:00:00Z"}}
+
+        def fake_update_cache(issue, mutate):
+            return mutate(dict(concurrent))
+
+        monkeypatch.setattr(model_availability, "update_cache", fake_update_cache)
+        captured = {}
         monkeypatch.setattr(
-            model_availability, "write_cache", lambda issue, cache: written.update(cache)
+            model_availability,
+            "write_outputs",
+            lambda cache, available, issue: captured.update(cache),
         )
-        monkeypatch.setattr(model_availability, "write_outputs", lambda *a: None)
         assert model_availability.main() == 0
-        assert "model-a" in written
+        assert "model-a" in captured

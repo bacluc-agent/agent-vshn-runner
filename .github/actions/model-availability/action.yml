@@ -5,8 +5,9 @@ description: >-
   issue in the issue repository. The cache issue number is taken from the
   MODEL_AVAILABILITY_CACHE_ISSUE env var, or auto-detected by searching for
   an issue titled "model-discovery cache". Available models cache for 24
-  hours, failed models for 2 hours. Relies on the job-level VSHN_US_AI_API_KEY
-  and ISSUE_REPOSITORY env vars set by the caller.
+  hours, failed models for 2 hours, timed-out models for 1 hour. Relies on
+  the job-level VSHN_US_AI_API_KEY and ISSUE_REPOSITORY env vars set by the
+  caller.
 outputs:
   cache-json:
     description: Merged cache JSON (current cache plus fresh probe results)
