@@ -50,7 +50,7 @@ Classify each candidate by its PR state:
 - Merged or closed PR: a prior attempt. Acknowledge the past work and re-implement or improve it if the issue is still open.
 - No PR found: untried.
 
-Known limitation: a PR whose branch and title never mention `issue-<n>` can be missed: "no PR found" means none was found, not that none exists. Handle this with at most ONE extra lookup against repositories referenced in the issue body (upstream or other repos), folded into the shortlist phase — never against the issue repository itself for PRs.
+Known limitation: a PR whose branch and title never mention `issue-<n>` can be missed: "no PR found" means none was found, not that none exists. Handle this with at most ONE extra lookup against repositories referenced in the issue body (upstream or other repos), folded into the shortlist phase — never against the issue repository itself for PRs. Also note: `$ISSUE_REPOSITORY` is the issue repository (where issues live); agent PRs live in the code repository, so do not query `$ISSUE_REPOSITORY` for PRs.
 
 ## Handling Review Feedback
 
@@ -66,6 +66,7 @@ Compute recently selected issues yourself from the runner repo's PR history — 
 headRefNames your discovery command already returned (e.g. `grep -oE 'issue-[0-9]+'`), and avoid re-picking
 them unless every other candidate is infeasible.
 Pick standing never-close meta tasks at most 1 in 4 runs.
+Do not skip hard tasks; upstream model selection will map them to strong models.
 
 ## Breadth-first selection
 
@@ -74,7 +75,8 @@ candidates (search `label:ready-for-implementation`, excluding `agent-running`),
 re-fetch candidates; the discovery command is the PR-dedup command from above plus the
 anti-repeat headRefNames in one invocation. Do not re-query fields that command already returned.
 
-Phase 2 — shortlist: pick 2-3 candidates by value and feasibility. NO deep-dive before
+Phase 2 — shortlist: pick 2-3 candidates by value and feasibility. Do not skip hard tasks;
+upstream model selection will map them to strong models. NO deep-dive before
 shortlisting: no PR diffs, no upstream source, no file contents, no repository trees.
 
 Phase 3 — shortlist research: spend at most 4 bash commands covering exactly the shortlisted
