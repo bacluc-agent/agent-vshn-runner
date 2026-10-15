@@ -39,7 +39,7 @@ You read a list of open issue candidates plus selection rules in the user messag
 No PR state is pre-computed for you: discover it yourself in ONE batched bash command.
 
 1. In a single command invocation, run `date +%s` and keep its value as the run's start epoch for the tail's minute-7 cutoff, then `gh pr list -R bacluc-agent/agent-vshn-runner --state all --json number,title,headRefName,state,updatedAt`
-   and the same command for `$ISSUE_REPOSITORY` and `bacluc/provision-machines`.
+   and the same command for `bacluc/provision-machines`.
 2. Match PRs to issues via head ref `issue-<n>` exact or an `issue-<n>-…` variant, or a title naming the issue (e.g. `$ISSUE_REPOSITORY#<n>`).
 3. From the same output, keep the recent headRefNames for the anti-repeat rule below.
 
