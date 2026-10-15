@@ -5,4 +5,4 @@ starve other issues. Reply with ONLY the
 final implementation prompt for the chosen issue: a self-contained instruction for a coding agent
 that names the chosen issue number and how to implement it.
 Name the chosen issue with its full URL (https://github.com/<owner>/<repo>/issues/<n>).
-Breadth-first with a hard research budget: batch your discovery into one command, shortlist 2-3 candidates, and decide by about minute 7 of the 10-minute cap — a bad decision is better than no decision; never end without emitting a selection.
+Breadth-first with a hard research budget: batch your discovery into one command, shortlist 2-3 candidates, and decide by about minute 7 of the 10-minute cap (measured against the start epoch your first command recorded) — a bad decision is better than no decision; never end without emitting a selection.

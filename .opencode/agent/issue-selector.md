@@ -38,14 +38,14 @@ You read a list of open issue candidates plus selection rules in the user messag
 
 No PR state is pre-computed for you: discover it yourself in ONE batched bash command.
 
-1. In a single command invocation, run `gh pr list -R bacluc-agent/agent-vshn-runner --state all --json number,title,headRefName,state,updatedAt`
-   and the same command for `$ISSUE_REPOSITORY`.
-2. Match PRs to issues via head ref `issue-<n>` or a title naming the issue (e.g. `$ISSUE_REPOSITORY#<n>`).
+1. In a single command invocation, run `date +%s` and keep its value as the run's start epoch for the tail's minute-7 cutoff, then `gh pr list -R bacluc-agent/agent-vshn-runner --state all --json number,title,headRefName,state,updatedAt`
+   and the same command for `$ISSUE_REPOSITORY` and `bacluc/provision-machines`.
+2. Match PRs to issues via head ref `issue-<n>` exact or an `issue-<n>-…` variant, or a title naming the issue (e.g. `$ISSUE_REPOSITORY#<n>`).
 3. From the same output, keep the recent headRefNames for the anti-repeat rule below.
 
 Classify each candidate by its PR state:
 
-- Open PR and no newer human comment: `gh issue view <n> -R "$ISSUE_REPOSITORY" --json comments` and ignore comments from bot authors. The issue is awaiting feedback — skip it unless every other candidate is infeasible. Do not open a duplicate branch or PR.
+- Open PR and no newer human comment: read the issue comments already fetched by discovery (run `gh issue view <n> -R "$ISSUE_REPOSITORY" --json comments` only if not already fetched, e.g. batched in Phase 3 for shortlisted issues) and ignore comments from bot authors. The issue is awaiting feedback — skip it unless every other candidate is infeasible. Do not open a duplicate branch or PR.
 - Open PR and fresh human feedback: apply the feedback on the existing branch and improve that PR. Never open a duplicate.
 - Merged or closed PR: a prior attempt. Acknowledge the past work and re-implement or improve it if the issue is still open.
 - No PR found: untried.
@@ -69,10 +69,10 @@ Pick standing never-close meta tasks at most 1 in 4 runs.
 
 ## Breadth-first selection
 
-Phase 1 — discovery: issue candidates and PR state come from ONE batched bash command, e.g.
-`gh issue list -R "$ISSUE_REPOSITORY" --json number,title,labels,createdAt,comments` and the
-PR-dedup command from above (plus the anti-repeat headRefNames) run together in a single
-invocation. Do not re-query fields that command already returned.
+Phase 1 — discovery (ONE bash command): the user message already contains the label-filtered
+candidates (search `label:ready-for-implementation`, excluding `agent-running`), so do not
+re-fetch candidates; the discovery command is the PR-dedup command from above plus the
+anti-repeat headRefNames in one invocation. Do not re-query fields that command already returned.
 
 Phase 2 — shortlist: pick 2-3 candidates by value and feasibility. NO deep-dive before
 shortlisting: no PR diffs, no upstream source, no file contents, no repository trees.
