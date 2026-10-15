@@ -137,10 +137,28 @@ jobs:
           default_tail="$(cat scripts/issue-selection-tail.txt)"
           tail_instruction="${SELECTION_PROMPT:-$default_tail}"
 
+          # Annotate candidates with PR status so the selector does not re-propose issues
+          # that already have open/merged PRs. Hint only: failures fall back to plain lines.
+          runner_prs="$RUNNER_TEMP/runner-prs.json"
+          issue_prs="$RUNNER_TEMP/issue-prs.json"
+          gh pr list -R bacluc-agent/agent-vshn-runner --state all --limit 200 \
+            --json number,state,title,headRefName,url,updatedAt > "$runner_prs" || true
+          gh pr list -R "$ISSUE_REPOSITORY" --state all --limit 200 \
+            --json number,state,title,headRefName,url,updatedAt > "$issue_prs" || true
+
+          pr_status="$RUNNER_TEMP/pr-status.tsv"
+          python3 scripts/candidate_pr_status.py "$candidates" "$runner_prs" "$issue_prs" \
+            > "$pr_status" || true
+
           prompt="$RUNNER_TEMP/selection-prompt.txt"
           {
             printf '%s\n' 'Open issue candidates in this repository (number: title, oldest first):'
-            jq -r '.[] | "\(.number): \(.title)"' "$search_json"
+            if [[ -s "$pr_status" ]]; then
+              jq -r '.[] | "\(.number): \(.title)"' "$search_json" \
+                | awk -F'\t' 'NR==FNR { status[$1]=$2; next } { n=$1; sub(/:.*/, "", n); if (status[n] != "") print $0 " [PR " status[n] "]"; else print $0 }' "$pr_status" -
+            else
+              jq -r '.[] | "\(.number): \(.title)"' "$search_json"
+            fi
             printf '%s\n' "$tail_instruction"
           } > "$prompt"
 
