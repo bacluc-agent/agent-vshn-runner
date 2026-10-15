@@ -36,9 +36,14 @@ You read a list of open issue candidates plus selection rules in the user messag
 
 ## PR Deduplication
 
-Before generating the prompt, check for a PR (open, merged, or closed) for the issue in each of `bacluc-agent/agent-vshn-runner`, `bacluc-agent/agent-vshn-todo`, and `bacluc/provision-machines`, plus any other repositories referenced in the issue body (extract `owner/repo` mentions, e.g. upstream `appuio/...`, `projectsyn/...`, `vshn/...`) — e.g. `gh pr list -R <repo> --state all --limit 200 --json number,updatedAt,headRefName,state,title` filtered to head refs or titles matching `issue-<n>` (exact, or followed by `-`, `_`, end-of-string, or any non-alphanumeric char) or `$ISSUE_REPOSITORY#<n>` — preferring the most recently updated match, and `gh issue view <number> -R "$ISSUE_REPOSITORY" --json comments --jq '[.comments[] | select(.author.login != "bacluc-agent")] | max_by(.createdAt) | .createdAt // "none"'` to compare last human comment timestamp vs PR `updatedAt`. If an open PR exists, forbid creating a duplicate branch/PR — improve the existing PR only when new human feedback exists (last-human-feedback newer than PR `updatedAt`). If PR is open and last-human-feedback is `none` or older than PR `updatedAt` (awaiting human feedback), skip it unless all other candidates are infeasible. If the PR is merged or closed, treat it as evidence of a prior attempt, not as a blocker: acknowledge the past work, check whether the issue is still open, and if so, re-implement or improve upon the closed work (e.g. a closed PR for a dependency-update issue may need a fresh PR for the next version).
-
-Known limitation: the batched lookup covers the three agent repos plus repos referenced in candidate issue bodies, matching `issue-<n>` in head refs or PR titles and `$ISSUE_REPOSITORY#<n>` in titles; a PR whose branch, title, and body never mention `issue-<n>` or `$ISSUE_REPOSITORY#<n>` (e.g. a branch `fix/clientPrint-flake-36` whose PR only says `Fixes #36`) can still be missed — when in doubt, run `gh pr list -R <repo> --state all --search "issue-<n>"` or `gh pr list -R <repo> --state all --search "$ISSUE_REPOSITORY#<n>"` across the referenced repos before concluding `[PR: none]`; treat `[PR: none]` as "no PR found in the queried repos", not as proof no agent PR exists; `last-human-feedback` counts issue comments only, not PR review comments.
+The candidate line's `pr=` field is pre-computed from `bacluc-agent/agent-vshn-runner` and
+`$ISSUE_REPOSITORY` (open, merged, or closed PRs whose branch is `issue-<n>` or whose title
+names the issue). Treat it as a hint, not proof. If it shows an open PR and `last-human=` is
+`none` or older than the PR's `updatedAt`, the candidate is awaiting human feedback: skip it
+unless every other candidate is infeasible. If it shows a merged or closed PR, treat it as
+evidence of a prior attempt: acknowledge the past work and re-implement or improve it if the
+issue is still open. If `pr=none`, do not re-query the two static repos; at most ONE lookup
+across other referenced repos is allowed within the research budget.
 
 ## Handling Review Feedback
 
@@ -56,6 +61,14 @@ and avoid re-picking them unless every other candidate is infeasible.
 Pick standing never-close meta tasks at most 1 in 4 runs.
 Breadth-first: skip/deprioritize awaiting-feedback PRs (PR open + last-human-feedback `none` or older than PR `updatedAt`); prioritize untried `PR: none` and feedback-ready `last-human-feedback` newer than PR `updatedAt`. Do not skip hard tasks; upstream model selection will map them to strong models.
 
-## Candidate enrichment
+## Candidate enrichment and research budget
 
-Each candidate line is `number: title`, oldest first. Enrich the candidates yourself with gh before judging value: `gh issue view <n> -R "$ISSUE_REPOSITORY" --json labels,createdAt,body` for labels, creation date, and a body excerpt; `gh pr list -R <repo> --state all --limit 200 --json number,updatedAt,headRefName,state,title` (see PR Deduplication) for PR state; and `gh issue view <n> -R "$ISSUE_REPOSITORY" --json comments` for last-human-feedback. Use these fields to judge value, breadth, and close-to-merge priority; infer target-repo and area and balance picks across them instead of repeating the dominant area. Prefer concrete, implementable bodies over docs-only issues.
+Each candidate line already carries labels, creation date, comment count, PR status (`pr=`),
+last-human-feedback (`last-human=`), and a body excerpt. Decide from this metadata; do not
+re-query fields that are already present.
+
+Hard budget: at most 6 tool calls total, target zero. Never fetch PR diffs, commits, file
+contents, upstream source, or repository trees. Do not re-run `gh issue view` for labels,
+createdAt, body, or comments — they are in the candidate line. At most ONE lookup for the
+likely pick (e.g. the full body or a referenced repo's PRs). Once you have chosen, emit the
+implementation prompt immediately; do not re-verify.

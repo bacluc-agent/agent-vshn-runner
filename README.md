@@ -75,7 +75,7 @@ This repository is the public half of that pair: it contains the worker workflow
 - **Schedule:** every hour at 24 minutes past the hour (`24 * * * *`), plus manual runs.
 - **What it does:**
   1. Searches `agent-vshn-todo` for the oldest open issue that does **not** have the `agent-running` label.
-  2. Uses the `issue-selector` agent to choose one issue from the candidate list.
+  2. Pre-annotates each candidate with labels, creation date, comment count, PR status, and last human feedback, then uses the `issue-selector` agent to choose one issue.
   3. Adds the `agent-running` label so the same issue is not picked again.
   4. Dispatches `.github/workflows/opencode.yml` with the selected issue as a prompt.
 

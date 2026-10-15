@@ -4,3 +4,6 @@ Deprioritize issues that only touch this meta-repo's own docs sources. Standing 
 starve other issues. Reply with ONLY the
 final implementation prompt for the chosen issue: a self-contained instruction for a coding agent
 that names the chosen issue number and how to implement it.
+Name the chosen issue with its full URL (https://github.com/<owner>/<repo>/issues/<n>).
+Each candidate line already carries labels, creation date, comment count, PR status (pr=), last-human-feedback (last-human=), and a body excerpt: decide from that metadata and do not re-query it.
+Hard budget: at most 6 tool calls total, target zero. Never fetch PR diffs, commits, file contents, upstream source, or repository trees. At most ONE lookup for the likely pick. Emit the final prompt immediately; do not re-verify.
