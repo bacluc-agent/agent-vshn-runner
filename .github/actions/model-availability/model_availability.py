@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Probe model availability and merge results into the cache issue."""
 
+import argparse
 import concurrent.futures
 import json
 import os
@@ -13,6 +14,8 @@ from datetime import datetime, timezone
 
 AVAILABLE_TTL_HOURS = 24
 FAILED_TTL_HOURS = 2
+TIMEOUT_TTL_HOURS = 1
+CAS_MAX_ATTEMPTS = 3
 GITHUB_ISSUE_BODY_LIMIT = 65536
 PROVIDERS = (
     ("vshn-us-ai", "VSHN_US_AI_API_KEY"),
@@ -51,16 +54,27 @@ def resolve_cache_issue() -> str | None:
         return None
 
 
-def read_cache(cache_issue: str) -> dict:
+def parse_cache(body: str) -> dict:
     try:
-        body = run_gh(
-            "issue", "view", cache_issue, "-R", issue_repo(),
-            "--json", "body", "--jq", ".body",
-        )
         cache = json.loads(body)
         return cache if isinstance(cache, dict) else {}
     except Exception:
         return {}
+
+
+def read_cache_raw(cache_issue: str) -> str | None:
+    try:
+        return run_gh(
+            "issue", "view", cache_issue, "-R", issue_repo(),
+            "--json", "body", "--jq", ".body",
+        )
+    except Exception:
+        return None
+
+
+def read_cache(cache_issue: str) -> dict:
+    body = read_cache_raw(cache_issue)
+    return parse_cache(body) if body is not None else {}
 
 
 def write_cache(cache_issue: str, cache: dict) -> None:
@@ -77,6 +91,48 @@ def write_cache(cache_issue: str, cache: dict) -> None:
         run_gh("issue", "edit", cache_issue, "-R", issue_repo(), "--body", body)
     except Exception as e:
         print(f"warning: failed to write cache issue {cache_issue}: {e}", file=sys.stderr)
+
+
+def update_cache(cache_issue: str, mutate) -> dict | None:
+    for _ in range(CAS_MAX_ATTEMPTS):
+        snapshot = read_cache_raw(cache_issue)
+        if snapshot is None:
+            print(
+                f"warning: could not read cache issue {cache_issue}; cache not updated",
+                file=sys.stderr,
+            )
+            return None
+        new_cache = mutate(parse_cache(snapshot))
+        if read_cache_raw(cache_issue) != snapshot:
+            continue
+        write_cache(cache_issue, new_cache)
+        return new_cache
+    print(
+        f"warning: cache issue {cache_issue} changed concurrently "
+        f"{CAS_MAX_ATTEMPTS} times; cache not updated",
+        file=sys.stderr,
+    )
+    return None
+
+
+def mark_failed(
+    cache_issue: str, *, model: str | None = None, provider: str | None = None
+) -> None:
+    checked = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def mutate(cache: dict) -> dict:
+        if provider is not None:
+            return {
+                key: (
+                    {"ok": False, "checked": checked}
+                    if key.split("/")[0] == provider
+                    else value
+                )
+                for key, value in cache.items()
+            }
+        return {**cache, model: {"ok": False, "checked": checked}}
+
+    update_cache(cache_issue, mutate)
 
 
 def parse_free_models(opencode_models_output: str) -> list[str]:
@@ -195,7 +251,10 @@ def build_candidates(
 def is_cache_fresh(entry, now: datetime) -> bool:
     if not isinstance(entry, dict) or not isinstance(entry.get("ok"), bool):
         return False
-    ttl_hours = AVAILABLE_TTL_HOURS if entry["ok"] else FAILED_TTL_HOURS
+    if not entry["ok"] and entry.get("reason") == "timeout":
+        ttl_hours = TIMEOUT_TTL_HOURS
+    else:
+        ttl_hours = AVAILABLE_TTL_HOURS if entry["ok"] else FAILED_TTL_HOURS
     try:
         checked = datetime.fromisoformat(entry["checked"].replace("Z", "+00:00"))
     except (KeyError, ValueError, TypeError):
@@ -214,7 +273,7 @@ def _write_probe_log(log_path: str, content: str) -> None:
 
 def probe_model(
     candidate: str, work_dir: str, timeout: int = PROBE_TIMEOUT_SECONDS
-) -> bool:
+) -> bool | None:
     probe_dir = os.path.join(work_dir, "probe-" + candidate.replace("/", "-"))
     os.makedirs(probe_dir, exist_ok=True)
     log_path = os.path.join(work_dir, "model-probes", "probe-" + candidate.replace("/", "-") + ".log")
@@ -236,13 +295,13 @@ def probe_model(
         )
     except subprocess.TimeoutExpired:
         _write_probe_log(log_path, f"TIMEOUT after {timeout}s\n")
-        return False
+        return None
     _write_probe_log(log_path, result.stdout + result.stderr)
     text = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", result.stdout)
     return result.returncode == 0 and re.fullmatch(r"\s*OK\.?\s*", text) is not None
 
 
-def probe_candidates(candidates: list[str], work_dir: str) -> dict[str, bool]:
+def probe_candidates(candidates: list[str], work_dir: str) -> dict[str, bool | None]:
     results = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT) as executor:
         futures = {
@@ -258,10 +317,13 @@ def probe_candidates(candidates: list[str], work_dir: str) -> dict[str, bool]:
     return results
 
 
-def merge_results(cache: dict, results: dict[str, bool], checked: str) -> dict:
+def merge_results(cache: dict, results: dict[str, bool | None], checked: str) -> dict:
     merged = dict(cache)
     for candidate, ok in results.items():
-        merged[candidate] = {"ok": ok, "checked": checked}
+        if ok is None:
+            merged[candidate] = {"ok": False, "reason": "timeout", "checked": checked}
+        else:
+            merged[candidate] = {"ok": ok, "checked": checked}
     return merged
 
 
@@ -314,12 +376,11 @@ def main() -> int:
     work_dir = os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()
     results = probe_candidates(pending, work_dir)
     checked = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    # Re-read the cache right before updating to avoid clobbering concurrent runs' updates
     if cache_issue is not None:
-        cache = read_cache(cache_issue) or cache
-    cache = merge_results(cache, results, checked)
-    if cache_issue is not None:
-        write_cache(cache_issue, cache)
+        merged = update_cache(cache_issue, lambda c: merge_results(c, results, checked))
+        cache = merged if merged is not None else merge_results(cache, results, checked)
+    else:
+        cache = merge_results(cache, results, checked)
     available = available_models(cache, free_models, provider_models)
     write_outputs(cache, available, cache_issue)
     print("Available models:")
@@ -327,5 +388,31 @@ def main() -> int:
     return 0
 
 
+def cli(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mark-failed", action="store_true")
+    parser.add_argument("--model")
+    parser.add_argument("--provider")
+    args = parser.parse_args(argv)
+    if args.mark_failed:
+        cache_issue = resolve_cache_issue()
+        if cache_issue is None:
+            print(
+                "warning: no cache issue resolved; cache not updated", file=sys.stderr
+            )
+            return 0
+        if args.provider:
+            mark_failed(cache_issue, provider=args.provider)
+        elif args.model:
+            mark_failed(cache_issue, model=args.model)
+        else:
+            print(
+                "warning: --mark-failed requires --model or --provider",
+                file=sys.stderr,
+            )
+        return 0
+    return main()
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cli(sys.argv[1:]))
