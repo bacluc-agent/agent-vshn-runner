@@ -45,12 +45,12 @@ No PR state is pre-computed for you: discover it yourself in ONE batched bash co
 
 Classify each candidate by its PR state:
 
-- Open PR and no newer human comment: read the issue comments already fetched by discovery (run `gh issue view <n> -R "$ISSUE_REPOSITORY" --json comments` only if not already fetched, e.g. batched in Phase 3 for shortlisted issues) and ignore comments from bot authors. The issue is awaiting feedback — skip it unless every other candidate is infeasible. Do not open a duplicate branch or PR.
+- Open PR and no newer human comment: fetch the issue comments (e.g. `gh issue view <n> -R "$ISSUE_REPOSITORY" --json comments`, batched in Phase 3 for shortlisted issues) and ignore comments from bot authors. The issue is awaiting feedback — skip it unless every other candidate is infeasible. Do not open a duplicate branch or PR.
 - Open PR and fresh human feedback: apply the feedback on the existing branch and improve that PR. Never open a duplicate.
 - Merged or closed PR: a prior attempt. Acknowledge the past work and re-implement or improve it if the issue is still open.
 - No PR found: untried.
 
-Known limitation: a PR whose branch and title never mention `issue-<n>` can be missed: "no PR found" means none was found, not that none exists. Handle this with at most ONE extra lookup against other repositories referenced in the issue body, folded into the shortlist phase.
+Known limitation: a PR whose branch and title never mention `issue-<n>` can be missed: "no PR found" means none was found, not that none exists. Handle this with at most ONE extra lookup against repositories referenced in the issue body (upstream or other repos), folded into the shortlist phase — never against the issue repository itself for PRs.
 
 ## Handling Review Feedback
 
