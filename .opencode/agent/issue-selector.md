@@ -36,14 +36,21 @@ You read a list of open issue candidates plus selection rules in the user messag
 
 ## PR Deduplication
 
-The candidate line's `pr=` field is pre-computed from `bacluc-agent/agent-vshn-runner` and
-`$ISSUE_REPOSITORY` (open, merged, or closed PRs whose branch is `issue-<n>` or whose title
-names the issue). Treat it as a hint, not proof. If it shows an open PR and `last-human=` is
-`none` or older than the PR's `updatedAt`, the candidate is awaiting human feedback: skip it
-unless every other candidate is infeasible. If it shows a merged or closed PR, treat it as
-evidence of a prior attempt: acknowledge the past work and re-implement or improve it if the
-issue is still open. If `pr=none`, do not re-query the two static repos; at most ONE lookup
-across other referenced repos is allowed within the research budget.
+No PR state is pre-computed for you: discover it yourself in ONE batched bash command.
+
+1. In a single command invocation, run `gh pr list -R bacluc-agent/agent-vshn-runner --state all --json number,title,headRefName,state,updatedAt`
+   and the same command for `$ISSUE_REPOSITORY`.
+2. Match PRs to issues via head ref `issue-<n>` or a title naming the issue (e.g. `$ISSUE_REPOSITORY#<n>`).
+3. From the same output, keep the recent headRefNames for the anti-repeat rule below.
+
+Classify each candidate by its PR state:
+
+- Open PR and no newer human comment: `gh issue view <n> -R "$ISSUE_REPOSITORY" --json comments` and ignore comments from bot authors. The issue is awaiting feedback — skip it unless every other candidate is infeasible. Do not open a duplicate branch or PR.
+- Open PR and fresh human feedback: apply the feedback on the existing branch and improve that PR. Never open a duplicate.
+- Merged or closed PR: a prior attempt. Acknowledge the past work and re-implement or improve it if the issue is still open.
+- No PR found: untried.
+
+Known limitation: a PR whose branch and title never mention `issue-<n>` can be missed: "no PR found" means none was found, not that none exists. Handle this with at most ONE extra lookup against other repositories referenced in the issue body, folded into the shortlist phase.
 
 ## Handling Review Feedback
 
@@ -59,27 +66,21 @@ Compute recently selected issues yourself from the runner repo's PR history, e.g
 `gh pr list -R bacluc-agent/agent-vshn-runner --state all --limit 30 --json headRefName --jq '.[].headRefName' | grep -oE 'issue-[0-9]+'`,
 and avoid re-picking them unless every other candidate is infeasible.
 Pick standing never-close meta tasks at most 1 in 4 runs.
-Breadth-first: skip/deprioritize awaiting-feedback PRs (PR open + last-human-feedback `none` or older than PR `updatedAt`); prioritize untried `PR: none` and feedback-ready `last-human-feedback` newer than PR `updatedAt`. Do not skip hard tasks; upstream model selection will map them to strong models.
 
-## Breadth-first and time awareness
+## Breadth-first selection
 
-We do not need an additional cache of lookups: the candidate line already carries the metadata.
-Search breadth-first: shortlist 2-3 candidates from the metadata first, then analyze only those
-further. Do not deep-dive a single issue (PR diffs, upstream source, file contents) before
-shortlisting.
+Phase 1 — discovery: issue candidates and PR state come from ONE batched bash command, e.g.
+`gh issue list -R "$ISSUE_REPOSITORY" --json number,title,labels,createdAt,comments` and the
+PR-dedup command from above (plus the anti-repeat headRefNames) run together in a single
+invocation. Do not re-query fields that command already returned.
 
-You are under a hard 10-minute cap. If time is running out, make a decision with what you have —
-a bad decision is better than no decision. Never let the run end without emitting a selection.
+Phase 2 — shortlist: pick 2-3 candidates by value and feasibility. NO deep-dive before
+shortlisting: no PR diffs, no upstream source, no file contents, no repository trees.
 
-## Candidate enrichment and research budget
+Phase 3 — shortlist research: spend at most 4 bash commands covering exactly the shortlisted
+issues, batching aggressively, e.g. `gh issue view <n> -R "$ISSUE_REPOSITORY" --json body,labels,comments`.
 
-Each candidate line already carries labels, creation date, comment count, PR status (`pr=`),
-last-human-feedback (`last-human=`), and a body excerpt. Decide from this metadata; do not
-re-query fields that are already present.
+Hard budget: at most 8 bash commands total. Once you have chosen an issue and drafted the
+implementation prompt, emit it immediately; do not re-verify.
 
-Hard budget: at most 6 tool calls total, target zero. Never fetch PR diffs, commits, file
-contents, upstream source, or repository trees. Do not re-run `gh issue view` for labels,
-createdAt, body, or comments — they are in the candidate line. At most ONE lookup for the
-likely pick (e.g. the full body or a referenced repo's PRs). Breadth-first: shortlist 2-3
-first, then spend the single lookup on the likely pick. Once you have chosen, emit the
-implementation prompt immediately; do not re-verify. If time is running out, decide now.
+You are under a hard 10-minute cap. If time is running out, make a decision with what you have — a bad decision is better than no decision. Never let the run end without emitting a selection.

@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,6 +21,3 @@ jobs:
 
       - name: Run completion check
         run: ./scripts/completion-check
-
-      - name: Run selection enrichment tests
-        run: uv run --group dev pytest -q scripts/test_enrich_candidates.py

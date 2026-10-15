@@ -137,50 +137,10 @@ jobs:
           default_tail="$(cat scripts/issue-selection-tail.txt)"
           tail_instruction="${SELECTION_PROMPT:-$default_tail}"
 
-          # Pre-annotate candidates so the selector does not spend its budget on gh lookups.
-          # Every enrichment call is best-effort: on any failure we fall back to plain lines.
-          pr_files=()
-          for repo in "$GITHUB_REPOSITORY" "$ISSUE_REPOSITORY"; do
-            pr_file="$RUNNER_TEMP/prs-$(printf '%s' "$repo" | tr '/' '-').json"
-            if gh pr list -R "$repo" --state all --limit 500 \
-                 --json number,state,title,headRefName,url,updatedAt,body > "$pr_file" 2>/dev/null \
-               && [[ -s "$pr_file" ]]; then
-              pr_files+=("$pr_file")
-            fi
-          done
-
-          comments_json="$RUNNER_TEMP/candidate-comments.json"
-          : > "$comments_json"
-          mapfile -t comment_numbers < <(jq -r '.[] | select((.comments // 0) > 0) | .number' "$search_json")
-          if (( ${#comment_numbers[@]} > 0 )); then
-            owner="${ISSUE_REPOSITORY%%/*}"
-            name="${ISSUE_REPOSITORY##*/}"
-            query="query { repository(owner: \"$owner\", name: \"$name\") {"
-            for n in "${comment_numbers[@]}"; do
-              query+=" i${n}: issue(number: ${n}) { comments(last: 100) { nodes { createdAt author { login } } } }"
-            done
-            query+=" } }"
-            gh api graphql -f query="$query" > "$comments_json" 2>/dev/null || : > "$comments_json"
-          fi
-
-          enriched="$RUNNER_TEMP/candidates-enriched.txt"
-          if python3 scripts/enrich_candidates.py \
-               --search-json "$search_json" \
-               --issue-repository "$ISSUE_REPOSITORY" \
-               --comments-json "$comments_json" \
-               "${pr_files[@]}" > "$enriched" 2>/dev/null && [[ -s "$enriched" ]]; then
-            candidate_lines="$(cat "$enriched")"
-          else
-            printf '%s\n' 'Candidate enrichment failed; falling back to plain candidate lines.' >&2
-            candidate_lines="$(jq -r '.[] | "\(.number): \(.title)"' "$search_json")"
-          fi
-
           prompt="$RUNNER_TEMP/selection-prompt.txt"
           {
-            printf '%s\n' 'Open issue candidates in this repository (oldest first). Each line is:'
-            printf '%s\n' '<number>: <title> | labels=<a,b> | created=<YYYY-MM-DD> | comments=<n> | pr=<owner/repo#num:STATE@updatedAt|none> | last-human=<ISO8601|none> | body="<excerpt>"'
-            printf '%s\n' 'The pr= and last-human= fields are hints to verify, not proof.'
-            printf '%s\n' "$candidate_lines"
+            printf '%s\n' 'Open issue candidates in this repository (number: title, oldest first):'
+            jq -r '.[] | "\(.number): \(.title)"' "$search_json"
             printf '%s\n' "$tail_instruction"
           } > "$prompt"
 
