@@ -308,3 +308,19 @@ def test_composition_pr_and_feedback(tmp_path, monkeypatch, capsys):
         "| pr=bacluc-agent/agent-vshn-runner#34:MERGED@2026-09-26T07:54:58Z "
         '| last-human=2026-09-26T08:00:00Z | body="## Goal Port improvements."'
     ]
+
+
+def test_search_json_object_not_list_returns_1(tmp_path, monkeypatch, capsys):
+    search = write_json(tmp_path / "search.json", {"items": []})
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "enrich_candidates",
+            "--search-json",
+            str(search),
+            "--issue-repository",
+            ISSUE_REPO,
+        ],
+    )
+    assert enrich_candidates.main() == 1
