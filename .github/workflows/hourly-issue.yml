@@ -143,7 +143,7 @@ jobs:
           for repo in "$GITHUB_REPOSITORY" "$ISSUE_REPOSITORY"; do
             pr_file="$RUNNER_TEMP/prs-$(printf '%s' "$repo" | tr '/' '-').json"
             if gh pr list -R "$repo" --state all --limit 500 \
-                 --json number,state,title,headRefName,url,updatedAt > "$pr_file" 2>/dev/null \
+                 --json number,state,title,headRefName,url,updatedAt,body > "$pr_file" 2>/dev/null \
                && [[ -s "$pr_file" ]]; then
               pr_files+=("$pr_file")
             fi

@@ -36,7 +36,15 @@ def run(
     return status, capsys.readouterr().out.splitlines()
 
 
-def pr(number, state, head_ref, title, updated_at, repo="bacluc-agent/agent-vshn-runner"):
+def pr(
+    number,
+    state,
+    head_ref,
+    title,
+    updated_at,
+    repo="bacluc-agent/agent-vshn-runner",
+    body="",
+):
     return {
         "number": number,
         "state": state,
@@ -44,6 +52,7 @@ def pr(number, state, head_ref, title, updated_at, repo="bacluc-agent/agent-vshn
         "headRefName": head_ref,
         "url": f"https://github.com/{repo}/pull/{number}",
         "updatedAt": updated_at,
+        "body": body,
     }
 
 
@@ -86,6 +95,16 @@ def test_branch_issue_150_does_not_match_candidate_15(tmp_path, monkeypatch, cap
     assert "pr=none" in lines[0]
 
 
+def test_branch_with_suffix_matches_candidate(tmp_path, monkeypatch, capsys):
+    items = [{"number": 15, "title": "Fix the thing"}]
+    prs = write_json(
+        tmp_path / "prs.json",
+        [pr(5, "OPEN", "issue-15-fix", "fix: cache", "2026-09-11T00:00:00Z")],
+    )
+    _, lines = run(tmp_path, monkeypatch, capsys, items, prs)
+    assert "pr=bacluc-agent/agent-vshn-runner#5:OPEN@2026-09-11T00:00:00Z" in lines[0]
+
+
 def test_tracker_qualified_title_match(tmp_path, monkeypatch, capsys):
     items = [{"number": 15, "title": "Fix the thing"}]
     prs = write_json(
@@ -102,6 +121,44 @@ def test_tracker_qualified_title_match(tmp_path, monkeypatch, capsys):
     )
     _, lines = run(tmp_path, monkeypatch, capsys, items, prs)
     assert "pr=bacluc-agent/agent-vshn-runner#5:OPEN@2026-09-11T00:00:00Z" in lines[0]
+
+
+def test_tracker_qualified_body_match(tmp_path, monkeypatch, capsys):
+    items = [{"number": 70, "title": "Speed up selection"}]
+    prs = write_json(
+        tmp_path / "prs.json",
+        [
+            pr(
+                40,
+                "OPEN",
+                "fix/faster-issue-selection",
+                "feat(selection): pre-annotate issue candidates",
+                "2026-09-11T00:00:00Z",
+                body="Tracking issue: [bacluc-agent/agent-vshn-todo#70](https://example.invalid)",
+            )
+        ],
+    )
+    _, lines = run(tmp_path, monkeypatch, capsys, items, prs)
+    assert "pr=bacluc-agent/agent-vshn-runner#40:OPEN@2026-09-11T00:00:00Z" in lines[0]
+
+
+def test_bare_hash_body_ignored(tmp_path, monkeypatch, capsys):
+    items = [{"number": 15, "title": "Fix the thing"}]
+    prs = write_json(
+        tmp_path / "prs.json",
+        [
+            pr(
+                5,
+                "OPEN",
+                "fix/foo",
+                "fix: unrelated",
+                "2026-09-11T00:00:00Z",
+                body="Closes #15 and also #16.",
+            )
+        ],
+    )
+    _, lines = run(tmp_path, monkeypatch, capsys, items, prs)
+    assert "pr=none" in lines[0]
 
 
 def test_issue_hash_title_match(tmp_path, monkeypatch, capsys):
@@ -132,6 +189,24 @@ def test_bare_hash_title_ignored(tmp_path, monkeypatch, capsys):
     assert "pr=none" in lines[0]
 
 
+def test_cross_repo_title_ignored(tmp_path, monkeypatch, capsys):
+    items = [{"number": 15, "title": "Fix the thing"}]
+    prs = write_json(
+        tmp_path / "prs.json",
+        [
+            pr(
+                5,
+                "OPEN",
+                "fix/foo",
+                "fix: cache (acme/other-repo#15)",
+                "2026-09-11T00:00:00Z",
+            )
+        ],
+    )
+    _, lines = run(tmp_path, monkeypatch, capsys, items, prs)
+    assert "pr=none" in lines[0]
+
+
 def test_newest_pr_wins(tmp_path, monkeypatch, capsys):
     items = [{"number": 22, "title": "Port model_choice"}]
     prs = write_json(
@@ -155,6 +230,35 @@ def test_pr_none_when_no_match(tmp_path, monkeypatch, capsys):
     assert "pr=none" in lines[0]
 
 
+def test_multiple_pr_files_keyed_by_repo_and_number(tmp_path, monkeypatch, capsys):
+    items = [
+        {"number": 15, "title": "Fix the thing"},
+        {"number": 26, "title": "Other thing"},
+    ]
+    runner_prs = write_json(
+        tmp_path / "runner-prs.json",
+        [pr(5, "OPEN", "issue-15", "fix: cache", "2026-09-11T00:00:00Z")],
+    )
+    todo_prs = write_json(
+        tmp_path / "todo-prs.json",
+        [
+            pr(
+                5,
+                "OPEN",
+                "issue-26",
+                "fix: other",
+                "2026-09-11T00:00:00Z",
+                repo="bacluc-agent/agent-vshn-todo",
+            )
+        ],
+    )
+    _, lines = run(tmp_path, monkeypatch, capsys, items, runner_prs, todo_prs)
+    assert lines[0].startswith("15: Fix the thing")
+    assert "pr=bacluc-agent/agent-vshn-runner#5:OPEN@2026-09-11T00:00:00Z" in lines[0]
+    assert lines[1].startswith("26: Other thing")
+    assert "pr=bacluc-agent/agent-vshn-todo#5:OPEN@2026-09-11T00:00:00Z" in lines[1]
+
+
 def test_last_human_max_non_bot(tmp_path, monkeypatch, capsys):
     items = [{"number": 15, "title": "Fix the thing"}]
     comments = write_json(
@@ -176,6 +280,35 @@ def test_last_human_max_non_bot(tmp_path, monkeypatch, capsys):
                                 {
                                     "createdAt": "2026-09-13T00:00:00Z",
                                     "author": {"login": "bacluc-agent"},
+                                },
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+    )
+    _, lines = run(tmp_path, monkeypatch, capsys, items, comments_path=comments)
+    assert "last-human=2026-09-12T00:00:00Z" in lines[0]
+
+
+def test_last_human_ignores_other_bots(tmp_path, monkeypatch, capsys):
+    items = [{"number": 15, "title": "Fix the thing"}]
+    comments = write_json(
+        tmp_path / "comments.json",
+        {
+            "data": {
+                "repository": {
+                    "i15": {
+                        "comments": {
+                            "nodes": [
+                                {
+                                    "createdAt": "2026-09-13T00:00:00Z",
+                                    "author": {"login": "renovate[bot]"},
+                                },
+                                {
+                                    "createdAt": "2026-09-12T00:00:00Z",
+                                    "author": {"login": "BacLuc"},
                                 },
                             ]
                         }
@@ -223,6 +356,23 @@ def test_last_human_none_when_comments_file_missing(tmp_path, monkeypatch, capsy
         comments_path=tmp_path / "missing.json",
     )
     assert "last-human=none" in lines[0]
+
+
+def test_malformed_comments_shape_degrades(tmp_path, monkeypatch, capsys):
+    items = [{"number": 15, "title": "Fix the thing"}]
+    shapes = [
+        [1, 2],
+        {"errors": [{"message": "boom"}]},
+        {"data": {"repository": {"i15": {"comments": "boom"}}}},
+        {"data": {"repository": {"i15": {"comments": {"nodes": ["boom"]}}}}},
+    ]
+    for shape in shapes:
+        comments = write_json(tmp_path / "comments.json", shape)
+        status, lines = run(
+            tmp_path, monkeypatch, capsys, items, comments_path=comments
+        )
+        assert status == 0
+        assert "last-human=none" in lines[0]
 
 
 def test_body_excerpt_truncated_and_single_line(tmp_path, monkeypatch, capsys):
