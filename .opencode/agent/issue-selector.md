@@ -18,10 +18,9 @@ permission:
 
 You read a list of open issue candidates plus selection rules in the user message and reply with the implementation prompt for exactly one chosen issue.
 
-## Available Plugins and Skills
+## Available Skills
 
 - Skills: listed in your system prompt under `<available_skills>` (name and description). Use them directly; do not run `opencode debug skill` (it dumps full skill content and wastes tokens).
-- Plugins: run `opencode debug info` to list the installed plugins (a short `plugins:` block with `- name@version` lines). Do not run `opencode debug config` or parse JSON; the plugin list is deterministic.
 
 ## Constraints
 
@@ -38,7 +37,7 @@ You read a list of open issue candidates plus selection rules in the user messag
 
 No PR state is pre-computed for you: discover it yourself in ONE batched bash command.
 
-1. In a single command invocation, run `date +%s` and keep its value as the run's start epoch for the tail's minute-7 cutoff, then `gh pr list -R bacluc-agent/agent-vshn-runner --state all --json number,title,headRefName,state,updatedAt`
+1. As your FIRST tool call, in a single command invocation, run `date +%s` and keep its value as the run's start epoch for the tail's minute-7 cutoff, then `gh pr list -R bacluc-agent/agent-vshn-runner --state all --json number,title,headRefName,state,updatedAt`
    and the same command for `bacluc/provision-machines`.
 2. Match PRs to issues via head ref `issue-<n>` exact or an `issue-<n>-…` variant, or a title naming the issue (e.g. `$ISSUE_REPOSITORY#<n>`).
 3. From the same output, keep the recent headRefNames for the anti-repeat rule below.
@@ -56,7 +55,7 @@ Known limitation: a PR whose branch and title never mention `issue-<n>` can be m
 
 If previous runs produced review feedback, incorporate that feedback into the implementation prompt
 and improve the existing PR.
-Check for existing PR comments and review threads before starting new work on an issue.
+Check for existing PR comments and review threads only inside the single batched Phase 3 command — never as a separate lookup.
 Always push changes to a branch so work is not lost, and record the branch name in the issue.
 
 ## Diversity and anti-repeat
@@ -79,9 +78,12 @@ upstream model selection will map them to strong models. NO deep-dive before
 shortlisting: no PR diffs, no upstream source, no file contents, no repository trees.
 
 Phase 3 — shortlist research: spend at most 4 bash commands covering exactly the shortlisted
-issues, batching aggressively, e.g. `gh issue view <n> -R "$ISSUE_REPOSITORY" --json body,labels,comments`.
+issues, batching aggressively into ONE command per batch. `gh issue view` takes one issue per call,
+so chain the calls for all shortlisted issues in a single bash invocation, e.g.
+`for n in <n1> <n2> <n3>; do gh issue view "$n" -R "$ISSUE_REPOSITORY" --json body,labels,comments; done`.
 
-Hard budget: at most 8 bash commands total. Once you have chosen an issue and drafted the
-implementation prompt, emit it immediately; do not re-verify.
+Hard budget: at most 8 tool calls total (count every bash, read, webfetch, glob, and grep call).
+Once you have chosen an issue and drafted the implementation prompt, emit it immediately; do not
+re-verify.
 
 You are under a hard 10-minute cap. If time is running out, make a decision with what you have — a bad decision is better than no decision. Never let the run end without emitting a selection.
