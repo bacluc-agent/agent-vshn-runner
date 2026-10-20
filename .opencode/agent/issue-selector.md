@@ -44,7 +44,7 @@ No PR state is pre-computed for you: discover it yourself in ONE batched bash co
 
 Classify each candidate by its PR state:
 
-- Open PR and no human comment newer than the PR's `updatedAt` (from the Phase 1 `gh pr list` output): fetch the issue comments (e.g. `gh issue view <n> -R "$ISSUE_REPOSITORY" --json comments`, batched in Phase 3 for shortlisted issues), ignore bot authors, and classify as awaiting feedback only when the last human comment is NOT newer than the PR's `updatedAt`. If every shortlisted candidate is awaiting feedback, pick the best one anyway — never expand the shortlist or re-widen research. Do not open a duplicate branch or PR.
+- Open PR: fetch the issue comments (e.g. `gh issue view <n> -R "$ISSUE_REPOSITORY" --json comments`, batched in Phase 3 for shortlisted issues), ignore bot authors, and classify as awaiting feedback only when the last human comment is NOT newer than the PR's `updatedAt` (from the Phase 1 `gh pr list` output). If every shortlisted candidate is awaiting feedback, pick the best one anyway — never expand the shortlist or re-widen research. Do not open a duplicate branch or PR.
 - Open PR and fresh human feedback: apply the feedback on the existing branch and improve that PR. Never open a duplicate.
 - Merged or closed PR: a prior attempt. Acknowledge the past work and re-implement or improve it if the issue is still open.
 - No PR found: untried.
@@ -55,7 +55,7 @@ Known limitation: a PR whose branch and title never mention `issue-<n>` can be m
 
 If previous runs produced review feedback, incorporate that feedback into the implementation prompt
 and improve the existing PR.
-Check for existing PR comments and review threads only inside the single batched Phase 3 command — never as a separate lookup.
+Check for existing PR comments and review threads only inside one of the batched Phase 3 commands — never as a separate lookup.
 In the implementation prompt you draft, always instruct the implementer to push changes to a branch so work is not lost and to record the branch name in the issue.
 
 ## Diversity and anti-repeat
