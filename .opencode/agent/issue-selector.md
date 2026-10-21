@@ -44,7 +44,7 @@ No PR state is pre-computed for you: discover it yourself in ONE batched bash co
 
 Classify each candidate by its PR state:
 
-- Open PR: fetch the issue comments (trimmed as in Phase 3, batched there for shortlisted issues), ignore bot authors, and classify as awaiting feedback only when the last human comment is NOT newer than the PR's `updatedAt` (from the Phase 1 `gh pr list` output). If every shortlisted candidate is awaiting feedback, pick the best one anyway — never expand the shortlist or re-widen research. Do not open a duplicate branch or PR.
+- Open PR: fetch the issue comments (trimmed as in Phase 3, batched there for shortlisted issues), ignore bot authors (GitHub App logins ending in `[bot]`) and the agent's own `bacluc-agent` comments, and classify as awaiting feedback only when the last human comment is NOT newer than the PR's `updatedAt` (from the Phase 1 `gh pr list` output). If every shortlisted candidate is awaiting feedback, pick the best one anyway — never expand the shortlist or re-widen research. Do not open a duplicate branch or PR.
 - Open PR and fresh human feedback: apply the feedback on the existing branch and improve that PR. Never open a duplicate.
 - Merged or closed PR: a prior attempt. Acknowledge the past work and re-implement or improve it if the issue is still open.
 - No PR found: untried.
@@ -73,15 +73,15 @@ candidates (search `label:ready-for-implementation`, excluding `agent-running`),
 re-fetch candidates; the discovery command is the PR-dedup command from above plus the
 anti-repeat headRefNames in one invocation. Do not re-query fields that command already returned.
 
-Phase 2 — shortlist: pick 2-3 candidates by value, feasibility, and Phase 1 PR state. Do not skip hard tasks;
+Phase 2 — shortlist: pick 2-3 candidates by value, feasibility, and Phase 1 PR state (prefer untried or feedback-ready issues over ones awaiting feedback). Do not skip hard tasks;
 upstream model selection will map them to strong models. NO deep-dive before
 shortlisting: no PR diffs, no upstream source, no file contents, no repository trees.
 
 Phase 3 — shortlist research: spend at most 4 bash commands covering exactly the shortlisted
 issues, batching aggressively into ONE command per batch. `gh issue view` takes one issue per call,
 so chain the calls for all shortlisted issues in a single bash invocation, e.g.
-`for n in <n1> <n2> <n3>; do gh issue view "$n" -R "$ISSUE_REPOSITORY" --json body,labels,comments --jq '{body: ((.body // "")[0:1500]), labels: [.labels[].name], comments: [.comments[] | select((.author.login // "") | test("\\[bot\\]$") | not)][-5:] | map({author: .author.login, createdAt: .createdAt, body: ((.body // "")[0:500])})}'; done`.
-Trim the payload: an untrimmed `gh issue view --json body,labels,comments` returns 100-360 KB per issue and can eat the whole minute-7 window.
+`for n in <n1> <n2> <n3>; do gh issue view "$n" -R "$ISSUE_REPOSITORY" --json body,labels,comments --jq '{body: ((.body // "")[0:1500]), labels: [.labels[].name], comments: [.comments[] | select(((.author.login // "") | tostring | test("\\[bot\\]$")) | not) | select(((.author.login // "") | tostring) != "bacluc-agent")][-5:] | map({author: .author.login, createdAt: .createdAt, body: ((.body // "")[0:500])})}'; done`.
+Trim the payload: an untrimmed `gh issue view --json body,labels,comments` can return 350 KB or more per issue and can eat the whole minute-7 window.
 
 Hard budget: at most 8 tool calls total (count every bash, read, webfetch, glob, and grep call).
 Once you have chosen an issue and drafted the implementation prompt, emit it immediately; do not
