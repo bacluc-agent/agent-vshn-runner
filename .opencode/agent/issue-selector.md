@@ -49,6 +49,8 @@ Classify each candidate by its PR state:
 - Merged or closed PR: a prior attempt. Acknowledge the past work and re-implement or improve it if the issue is still open.
 - No PR found: untried.
 
+Prefer untried candidates and candidates with fresh human feedback over ones that are only awaiting feedback.
+
 Known limitation: a PR whose branch and title never mention `issue-<n>` can be missed: "no PR found" means none was found, not that none exists. Handle this with at most ONE extra lookup against repositories referenced in the issue body (upstream or other repos), folded into the Phase 3 shortlist-research batch — never against `$ISSUE_REPOSITORY` itself for PRs (it holds the issues).
 
 ## Handling Review Feedback
@@ -73,7 +75,7 @@ candidates (search `label:ready-for-implementation`, excluding `agent-running`),
 re-fetch candidates; the discovery command is the PR-dedup command from above plus the
 anti-repeat headRefNames in one invocation. Do not re-query fields that command already returned.
 
-Phase 2 — shortlist: pick 2-3 candidates by value, feasibility, and Phase 1 PR state (prefer untried or feedback-ready issues over ones awaiting feedback). Do not skip hard tasks;
+Phase 2 — shortlist: pick 2-3 candidates by value, feasibility, and Phase 1 PR state (prefer untried issues over ones with an open PR). Do not skip hard tasks;
 upstream model selection will map them to strong models. NO deep-dive before
 shortlisting: no PR diffs, no upstream source, no file contents, no repository trees.
 
