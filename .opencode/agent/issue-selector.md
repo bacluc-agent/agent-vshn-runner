@@ -49,7 +49,7 @@ Classify each candidate by its PR state:
 - Merged or closed PR: a prior attempt. Acknowledge the past work and re-implement or improve it if the issue is still open.
 - No PR found: untried.
 
-Known limitation: a PR whose branch and title never mention `issue-<n>` can be missed: "no PR found" means none was found, not that none exists. Handle this with at most ONE extra lookup against repositories referenced in the issue body (upstream or other repos), folded into the Phase 3 shortlist-research batch — never against `$ISSUE_REPOSITORY` itself for PRs (it holds the issues; agent PRs live in the code repository).
+Known limitation: a PR whose branch and title never mention `issue-<n>` can be missed: "no PR found" means none was found, not that none exists. Handle this with at most ONE extra lookup against repositories referenced in the issue body (upstream or other repos), folded into the Phase 3 shortlist-research batch — never against `$ISSUE_REPOSITORY` itself for PRs (it holds the issues).
 
 ## Handling Review Feedback
 
@@ -80,11 +80,11 @@ shortlisting: no PR diffs, no upstream source, no file contents, no repository t
 Phase 3 — shortlist research: spend at most 4 bash commands covering exactly the shortlisted
 issues, batching aggressively into ONE command per batch. `gh issue view` takes one issue per call,
 so chain the calls for all shortlisted issues in a single bash invocation, e.g.
-`for n in <n1> <n2> <n3>; do gh issue view "$n" -R "$ISSUE_REPOSITORY" --json body,labels,comments --jq '{body: ((.body // "")[0:600]), labels: [.labels[].name], comments: [.comments[-10:][] | {author: .author.login, createdAt: .createdAt, body: ((.body // "")[0:300])}]}'; done`.
-Trim the payload: an untrimmed `gh issue view --json body,labels,comments` returns 100-350 KB per issue and can eat the whole minute-7 window.
+`for n in <n1> <n2> <n3>; do gh issue view "$n" -R "$ISSUE_REPOSITORY" --json body,labels,comments --jq '{body: ((.body // "")[0:1500]), labels: [.labels[].name], comments: [.comments[] | select((.author.login // "") | test("\\[bot\\]$") | not)][-5:] | map({author: .author.login, createdAt: .createdAt, body: ((.body // "")[0:500])})}'; done`.
+Trim the payload: an untrimmed `gh issue view --json body,labels,comments` returns 100-360 KB per issue and can eat the whole minute-7 window.
 
 Hard budget: at most 8 tool calls total (count every bash, read, webfetch, glob, and grep call).
 Once you have chosen an issue and drafted the implementation prompt, emit it immediately; do not
 re-verify.
 
-You are under a hard 10-minute cap. Check elapsed time by appending `echo $(( $(date +%s) - <start_epoch> ))` to your Phase 3 batched command, where `<start_epoch>` is the value `date +%s` returned in Phase 1: if it prints 420 or more (about minute 7), stop researching and decide from the shortlist as-is. A bad decision is better than no decision. Never let the run end without emitting a selection.
+You are under a hard 10-minute cap. Check elapsed time by appending `echo $(( $(date +%s) - <start_epoch> ))` to your Phase 3 batched command, replacing `<start_epoch>` with the number `date +%s` returned in Phase 1: if it prints 420 or more (about minute 7), stop researching and decide from the shortlist as-is. A bad decision is better than no decision. Never let the run end without emitting a selection.
