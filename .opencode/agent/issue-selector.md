@@ -37,14 +37,14 @@ You read a list of open issue candidates plus selection rules in the user messag
 
 No PR state is pre-computed for you: discover it yourself in ONE batched bash command.
 
-1. As your FIRST tool call, in a single command invocation, run `date +%s` and keep its value as the run's start epoch for the tail's minute-7 cutoff, then `gh pr list -R bacluc-agent/agent-vshn-runner --state all --limit 200 --json number,title,headRefName,state,updatedAt`
+1. As your FIRST tool call, in a single command invocation, run `date +%s` and keep its value as the run's start epoch (`<start_epoch>`), then `gh pr list -R bacluc-agent/agent-vshn-runner --state all --limit 200 --json number,title,headRefName,state,updatedAt`
    and the same command with `--limit 200` for `bacluc/provision-machines`.
 2. Match PRs to issues via `issue-<n>` (or an `issue-<n>-…` variant) in the head ref or the title, or a title containing `<owner>/<repo>#<n>` where `<owner>/<repo>` is the expanded `$ISSUE_REPOSITORY` value, not the literal string.
 3. From the same output, keep the recent headRefNames for the anti-repeat rule below.
 
 Classify each candidate by its PR state:
 
-- Open PR: fetch the issue comments (e.g. `gh issue view <n> -R "$ISSUE_REPOSITORY" --json comments`, batched in Phase 3 for shortlisted issues), ignore bot authors, and classify as awaiting feedback only when the last human comment is NOT newer than the PR's `updatedAt` (from the Phase 1 `gh pr list` output). If every shortlisted candidate is awaiting feedback, pick the best one anyway — never expand the shortlist or re-widen research. Do not open a duplicate branch or PR.
+- Open PR: fetch the issue comments (trimmed as in Phase 3, batched there for shortlisted issues), ignore bot authors, and classify as awaiting feedback only when the last human comment is NOT newer than the PR's `updatedAt` (from the Phase 1 `gh pr list` output). If every shortlisted candidate is awaiting feedback, pick the best one anyway — never expand the shortlist or re-widen research. Do not open a duplicate branch or PR.
 - Open PR and fresh human feedback: apply the feedback on the existing branch and improve that PR. Never open a duplicate.
 - Merged or closed PR: a prior attempt. Acknowledge the past work and re-implement or improve it if the issue is still open.
 - No PR found: untried.
@@ -80,10 +80,11 @@ shortlisting: no PR diffs, no upstream source, no file contents, no repository t
 Phase 3 — shortlist research: spend at most 4 bash commands covering exactly the shortlisted
 issues, batching aggressively into ONE command per batch. `gh issue view` takes one issue per call,
 so chain the calls for all shortlisted issues in a single bash invocation, e.g.
-`for n in <n1> <n2> <n3>; do gh issue view "$n" -R "$ISSUE_REPOSITORY" --json body,labels,comments; done`.
+`for n in <n1> <n2> <n3>; do gh issue view "$n" -R "$ISSUE_REPOSITORY" --json body,labels,comments --jq '{body: ((.body // "")[0:600]), labels: [.labels[].name], comments: [.comments[-10:][] | {author: .author.login, createdAt: .createdAt, body: ((.body // "")[0:300])}]}'; done`.
+Trim the payload: an untrimmed `gh issue view --json body,labels,comments` returns 100-350 KB per issue and can eat the whole minute-7 window.
 
 Hard budget: at most 8 tool calls total (count every bash, read, webfetch, glob, and grep call).
 Once you have chosen an issue and drafted the implementation prompt, emit it immediately; do not
 re-verify.
 
-You are under a hard 10-minute cap. Check elapsed time by appending `date +%s` to your Phase 3 batched command and comparing against the start epoch from Phase 1: if about 420 seconds or more have elapsed, stop researching and decide from the shortlist as-is. A bad decision is better than no decision. Never let the run end without emitting a selection.
+You are under a hard 10-minute cap. Check elapsed time by appending `echo $(( $(date +%s) - <start_epoch> ))` to your Phase 3 batched command, where `<start_epoch>` is the value `date +%s` returned in Phase 1: if it prints 420 or more (about minute 7), stop researching and decide from the shortlist as-is. A bad decision is better than no decision. Never let the run end without emitting a selection.
