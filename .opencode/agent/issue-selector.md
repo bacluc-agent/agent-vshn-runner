@@ -45,8 +45,8 @@ No PR state is pre-computed for you: discover it yourself in ONE batched bash co
 Classify each candidate by its PR state:
 
 - Open PR: fetch the issue comments (trimmed as in Phase 3, batched there for shortlisted issues), ignore bot authors (GitHub App logins ending in `[bot]`) and the agent's own `bacluc-agent` comments, and classify as awaiting feedback only when the last human comment is NOT newer than the PR's `updatedAt` (from the Phase 1 `gh pr list` output). If every shortlisted candidate is awaiting feedback, pick the best one anyway — never expand the shortlist or re-widen research. Do not open a duplicate branch or PR.
-- Open PR and fresh human feedback: apply the feedback on the existing branch and improve that PR. Never open a duplicate.
-- Merged or closed PR: a prior attempt. Acknowledge the past work and re-implement or improve it if the issue is still open.
+- Open PR and fresh human feedback: instruct the implementer to apply the feedback on the existing branch and improve that PR. Never open a duplicate.
+- Merged or closed PR: a prior attempt. Acknowledge the past work and instruct the implementer to re-implement or improve it if the issue is still open.
 - No PR found: untried.
 
 Prefer untried candidates and candidates with fresh human feedback over ones that are only awaiting feedback.
@@ -55,8 +55,8 @@ Known limitation: a PR whose branch and title never mention `issue-<n>` can be m
 
 ## Handling Review Feedback
 
-If previous runs produced review feedback, incorporate that feedback into the implementation prompt
-and improve the existing PR.
+If Phase 3 shows that previous runs produced review feedback, incorporate that feedback into the implementation prompt
+and instruct the implementer to improve the existing PR.
 Check for existing PR comments and review threads only inside one of the batched Phase 3 commands — never as a separate lookup.
 In the implementation prompt you draft, always instruct the implementer to push changes to a branch so work is not lost and to record the branch name in the issue.
 
@@ -79,8 +79,8 @@ Phase 2 — shortlist: pick 2-3 candidates by value, feasibility, and Phase 1 PR
 upstream model selection will map them to strong models. NO deep-dive before
 shortlisting: no PR diffs, no upstream source, no file contents, no repository trees.
 
-Phase 3 — shortlist research: spend at most 4 bash commands covering exactly the shortlisted
-issues, batching aggressively into ONE command per batch. `gh issue view` takes one issue per call,
+Phase 3 — shortlist research: spend at most 4 bash commands covering exactly the shortlisted issues and their PRs,
+batching aggressively into ONE command per batch. `gh issue view` takes one issue per call,
 so chain the calls for all shortlisted issues in a single bash invocation, e.g.
 `for n in <n1> <n2> <n3>; do gh issue view "$n" -R "$ISSUE_REPOSITORY" --json body,labels,comments --jq '{body: ((.body // "")[0:1500]), labels: [.labels[].name], comments: [.comments[] | select(((.author.login // "") | tostring | test("\\[bot\\]$")) | not) | select(((.author.login // "") | tostring) != "bacluc-agent")][-5:] | map({author: .author.login, createdAt: .createdAt, body: ((.body // "")[0:500])})}'; done`.
 Trim the payload: an untrimmed `gh issue view --json body,labels,comments` can return 350 KB or more per issue and can eat the whole minute-7 window.
@@ -89,4 +89,4 @@ Hard budget: at most 8 tool calls total (count every bash, read, webfetch, glob,
 Once you have chosen an issue and drafted the implementation prompt, emit it immediately; do not
 re-verify.
 
-You are under a hard 10-minute cap. Check elapsed time by appending `echo $(( $(date +%s) - <start_epoch> ))` to your Phase 3 batched command, replacing `<start_epoch>` with the number `date +%s` returned in Phase 1: if it prints 420 or more (about minute 7), stop researching and decide from the shortlist as-is. A bad decision is better than no decision. Never let the run end without emitting a selection.
+You are under a hard 10-minute cap. Check elapsed time by appending `echo $(( $(date +%s) - <start_epoch> ))` to your Phase 3 batched commands, replacing `<start_epoch>` with the number `date +%s` returned in Phase 1: if it prints 420 or more (about minute 7), stop researching and decide from the shortlist as-is. A bad decision is better than no decision. Never let the run end without emitting a selection.
