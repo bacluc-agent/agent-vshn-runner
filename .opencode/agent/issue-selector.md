@@ -39,7 +39,7 @@ No PR state is pre-computed for you: discover it yourself in ONE batched bash co
 
 1. As your FIRST tool call, in a single command invocation, run `date +%s` and keep its value as the run's start epoch (`<start_epoch>`), then `gh pr list -R bacluc-agent/agent-vshn-runner --state all --limit 200 --json number,title,headRefName,state,updatedAt`
    and the same command with `--limit 200` for `bacluc/provision-machines`.
-2. Match PRs to issues via `issue-<n>` (or an `issue-<n>-…` variant) in the head ref or the title, or a title containing `<owner>/<repo>#<n>` where `<owner>/<repo>` is the expanded `$ISSUE_REPOSITORY` value, not the literal string.
+2. Match PRs to issues via `issue-<n>` (exact, or followed by `-`, `_`, end-of-string, or any non-alphanumeric char) in the head ref or the title, or a title containing `<owner>/<repo>#<n>` where `<owner>/<repo>` is the expanded `$ISSUE_REPOSITORY` value, not the literal string, preferring the most recently updated match.
 3. From the same output, keep the recent headRefNames for the anti-repeat rule below.
 
 Classify each candidate by its PR state:
@@ -51,7 +51,7 @@ Classify each candidate by its PR state:
 
 Prefer untried candidates and candidates with fresh human feedback over ones that are only awaiting feedback.
 
-Known limitation: a PR whose branch and title never mention `issue-<n>` can be missed: "no PR found" means none was found, not that none exists. Handle this with at most ONE extra lookup against repositories referenced in the issue body (upstream or other repos), folded into the Phase 3 shortlist-research batch — never against `$ISSUE_REPOSITORY` itself for PRs (it holds the issues).
+Known limitation: a PR whose branch and title never mention `issue-<n>`, or that falls outside the deliberate `--limit 200` window, can be missed: "no PR found" means none was found, not that none exists. Handle this with at most ONE extra lookup against repositories referenced in the issue body (upstream or other repos), folded into the Phase 3 shortlist-research batch — never against `$ISSUE_REPOSITORY` itself for PRs (it holds the issues).
 
 ## Handling Review Feedback
 
