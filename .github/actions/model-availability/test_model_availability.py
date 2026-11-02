@@ -69,6 +69,53 @@ class TestDiscoverModels:
         assert any(k.lower() == "x-opencode-session" for k in captured["headers"])
         assert captured["full_url"].endswith("/models")
 
+    def test_discovers_router_provider(self, monkeypatch):
+        captured = {}
+        monkeypatch.setenv("VSHN_US_AI_API_KEY", "us-key")
+        monkeypatch.setenv("VSHN_LLM_ROUTER_API_KEY", "router-key")
+        config = {
+            "provider": {
+                "vshn-us-ai": {"options": {"baseURL": "https://us.example.com/v1"}},
+                "vshn-llm-router": {
+                    "options": {"baseURL": "https://router.example.com"}
+                },
+            }
+        }
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def __init__(self, body):
+                self.body = body
+
+            def read(self):
+                return self.body
+
+        def fake_urlopen(request, timeout=30):
+            captured[request.full_url] = request.headers
+            return FakeResponse(b'{"data": [{"id": "opencode/glm-5.2"}]}')
+
+        def fake_run2(args, *a, **kw):
+            if args == ["opencode", "models"]:
+                return types.SimpleNamespace(stdout="")
+            if args == ["opencode", "debug", "config"]:
+                return fake_debug_config(config, kw)
+            raise AssertionError(f"unexpected args: {args}")
+
+        monkeypatch.setattr(model_availability.urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.setattr(model_availability.subprocess, "run", fake_run2)
+        free_models, provider_models = model_availability.discover_models()
+        assert provider_models["vshn-llm-router"] == ["opencode/glm-5.2"]
+        router_headers = captured["https://router.example.com/models"]
+        assert router_headers.get("Authorization") == "Bearer router-key"
+        assert captured["https://us.example.com/v1/models"].get(
+            "Authorization"
+        ) == "Bearer us-key"
+
     def test_endpoint_failure_per_provider(self, monkeypatch):
         def fail(request, timeout=30):
             raise RuntimeError("403 Forbidden")
@@ -165,6 +212,19 @@ class TestParseGoModelIds:
         assert model_availability.parse_go_model_ids("not json") == []
 
 
+class TestIsProbeableModel:
+    def test_canonical_route_ids_are_probeable(self):
+        assert model_availability.is_probeable_model("opencode/glm-5.2")
+        assert model_availability.is_probeable_model("subscription.opencode/glm-5.2")
+        assert model_availability.is_probeable_model("openrouter.deepseek/deepseek-chat-v3.1")
+
+    def test_fallback_route_ids_are_skipped(self):
+        assert not model_availability.is_probeable_model("opencode-fallback/glm-5.3-flash")
+        assert not model_availability.is_probeable_model(
+            "subscription.opencode-fallback/beam-free"
+        )
+
+
 class TestBuildCandidates:
     def test_skips_providers_without_api_key(self):
         env = {}
@@ -184,6 +244,39 @@ class TestBuildCandidates:
             env,
         )
         assert candidates == ["vshn-us-ai/glm-5.2", "opencode/a-free"]
+
+
+class TestBuildCandidatesRouter:
+    def test_includes_router_provider_when_key_present(self):
+        env = {"VSHN_LLM_ROUTER_API_KEY": "key2"}
+        candidates = model_availability.build_candidates(
+            [],
+            {"vshn-llm-router": ["opencode/glm-5.2", "opencode-fallback/glm-5.2"]},
+            env,
+        )
+        assert candidates == ["vshn-llm-router/opencode/glm-5.2"]
+
+    def test_skips_fallback_route_ids(self):
+        env = {"VSHN_US_AI_API_KEY": "key1"}
+        candidates = model_availability.build_candidates(
+            [],
+            {
+                "vshn-us-ai": [
+                    "subscription.opencode/glm-5.2",
+                    "subscription.opencode-fallback/glm-5.2",
+                ]
+            },
+            env,
+        )
+        assert candidates == ["vshn-us-ai/subscription.opencode/glm-5.2"]
+
+    def test_router_skipped_without_api_key(self):
+        env = {}
+        assert model_availability.build_candidates(
+            [],
+            {"vshn-llm-router": ["opencode/glm-5.2"]},
+            env,
+        ) == []
 
 
 class TestIsCacheFresh:
@@ -230,15 +323,38 @@ class TestAvailableModels:
             "vshn-us-ai/glm-5.2": {"ok": True, "checked": "x"},
             "opencode/a-free": {"ok": True, "checked": "x"},
             "opencode/b-free": {"ok": False, "checked": "x"},
+            "vshn-llm-router/opencode/glm-5.2": {"ok": True, "checked": "x"},
         }
         assert model_availability.available_models(
             cache,
             ["opencode/a-free", "opencode/b-free"],
-            {"vshn-us-ai": ["glm-5.2"]},
+            {"vshn-us-ai": ["glm-5.2"], "vshn-llm-router": ["opencode/glm-5.2"]},
         ) == [
             "opencode/a-free",
             "vshn-us-ai/glm-5.2",
+            "vshn-llm-router/opencode/glm-5.2",
         ]
+
+    def test_skips_fallback_route_ids(self):
+        cache = {
+            "vshn-us-ai/subscription.opencode-fallback/glm-5.2": {"ok": True, "checked": "x"},
+        }
+        assert model_availability.available_models(
+            cache,
+            [],
+            {"vshn-us-ai": ["subscription.opencode-fallback/glm-5.2"]},
+        ) == []
+
+    def test_router_models_after_provider_models(self):
+        cache = {
+            "vshn-llm-router/opencode/glm-5.2": {"ok": True, "checked": "x"},
+            "vshn-llm-router/opencode-fallback/x": {"ok": True, "checked": "x"},
+        }
+        assert model_availability.available_models(
+            cache,
+            [],
+            {"vshn-llm-router": ["opencode/glm-5.2", "opencode-fallback/x"]},
+        ) == ["vshn-llm-router/opencode/glm-5.2"]
 
 
 class TestResolveCacheIssue:

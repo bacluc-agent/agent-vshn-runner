@@ -19,6 +19,8 @@ jobs:
       BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
       ISSUE_REPOSITORY: ${{ vars.ISSUE_REPOSITORY || github.repository }}
       MODEL_AVAILABILITY_CACHE_ISSUE: ${{ vars.MODEL_AVAILABILITY_CACHE_ISSUE }}
+      VSHN_LLM_ROUTER_BASE_URL: ${{ secrets.VSHN_LLM_ROUTER_BASE_URL }}
+      VSHN_LLM_ROUTER_API_KEY: ${{ secrets.VSHN_LLM_ROUTER_API_KEY }}
 
     steps:
       - name: Check out repository
@@ -46,7 +48,8 @@ jobs:
           set -Eeuo pipefail
 
           printf '::add-mask::%s\n' "$GITHUB_TOKEN"
-          printf '::add-mask::%s\n' "$VSHN_US_AI_API_KEY"
+          printf '::add-mask::%s\n' "${VSHN_US_AI_API_KEY:-}"
+          printf '::add-mask::%s\n' "${VSHN_LLM_ROUTER_API_KEY:-}"
 
           gh label create agent-refined -R "$ISSUE_REPOSITORY" \
             --color 1D76DB --description 'Refined by the issue-refiner agent' --force
@@ -82,12 +85,16 @@ jobs:
           # probe but fail as coordinator/selector in 10+ runs (e.g. 34029380869, 34042660858).
           mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models_file" | grep -Ev '/(ling-3\.0-flash-fin|mimo-v2\.5)-free$|/nemotron-' | awk '!seen[$0]++')
           for candidate in \
-            'vshn-us-ai/subscription.qwen3.8-max' \
+            'vshn-llm-router/opencode/qwen3.8-max' \
+            'vshn-llm-router/opencode/qwen3.8-flash' \
             'opencode/big-pickle' \
             "${free_models[@]}"; do
             case "$candidate" in
               vshn-us-ai/*)
                 grep -Fxq "$candidate" "$available_models_file" && [[ -n "$VSHN_US_AI_API_KEY" ]] || continue
+                ;;
+              vshn-llm-router/*)
+                grep -Fxq "$candidate" "$available_models_file" && [[ -n "$VSHN_LLM_ROUTER_API_KEY" ]] || continue
                 ;;
               opencode/big-pickle)
                 grep -Fxq "$candidate" "$available_models_file" || continue

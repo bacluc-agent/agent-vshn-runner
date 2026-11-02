@@ -1,10 +1,10 @@
 name: Set up OpenCode
 description: >-
   Installs the OpenCode CLI and prepares the shared OpenCode configuration
-  from the provision-machines repository. When VSHN_US_AI_BASE_URL is set,
-  writes an untracked config with the vshn-us-ai provider options and points
-  OPENCODE_CONFIG at it. Relies on the job-level GITHUB_TOKEN set by the
-  caller.
+  from the provision-machines repository. When a VSHN provider base URL is
+  configured, writes an untracked config with the vshn-us-ai and
+  vshn-llm-router provider options and points OPENCODE_CONFIG at it.
+  Relies on the job-level GITHUB_TOKEN set by the caller.
 runs:
   using: composite
   steps:
@@ -29,6 +29,8 @@ runs:
         printf '::add-mask::%s\n' "$GITHUB_TOKEN"
         printf '::add-mask::%s\n' "${VSHN_US_AI_API_KEY:-}"
         printf '::add-mask::%s\n' "${VSHN_US_AI_BASE_URL:-}"
+        printf '::add-mask::%s\n' "${VSHN_LLM_ROUTER_API_KEY:-}"
+        printf '::add-mask::%s\n' "${VSHN_LLM_ROUTER_BASE_URL:-}"
         printf '::add-mask::%s\n' "${BRAVE_API_KEY:-}"
         source_dir="$RUNNER_TEMP/provision-machines"
         config_dir="$RUNNER_TEMP/opencode-config"
@@ -102,11 +104,29 @@ runs:
         rm -rf "$HOME/.config/opencode"
         cp -a "$config_dir" "$HOME/.config/opencode"
 
+        untracked_build="$RUNNER_TEMP/untracked-config.json"
+        : > "$untracked_build"
         if [[ -n "${VSHN_US_AI_BASE_URL:-}" ]]; then
           jq -n \
             --arg baseURL "$VSHN_US_AI_BASE_URL" \
             --arg apiKey "${VSHN_US_AI_API_KEY:-}" \
             '{provider: {"vshn-us-ai": {options: {baseURL: $baseURL, apiKey: $apiKey}}}}' \
-            > "$HOME/.config/opencode/untracked-config.jsonc"
+            > "$untracked_build.tmp" && mv "$untracked_build.tmp" "$untracked_build"
+        fi
+        if [[ -n "${VSHN_LLM_ROUTER_BASE_URL:-}" ]]; then
+          jq -n \
+            --arg baseURL "$VSHN_LLM_ROUTER_BASE_URL" \
+            --arg apiKey "${VSHN_LLM_ROUTER_API_KEY:-}" \
+            '{provider: {"vshn-llm-router": {options: {baseURL: $baseURL, apiKey: $apiKey}}}}' \
+            > "$untracked_build.router"
+          if [[ -s "$untracked_build" ]]; then
+            jq -s '.[0] * .[1]' "$untracked_build" "$untracked_build.router" \
+              > "$untracked_build.new" && mv "$untracked_build.new" "$untracked_build"
+          else
+            mv "$untracked_build.router" "$untracked_build"
+          fi
+        fi
+        if [[ -s "$untracked_build" ]]; then
+          cp "$untracked_build" "$HOME/.config/opencode/untracked-config.jsonc"
           printf 'OPENCODE_CONFIG=%s\n' "$HOME/.config/opencode/untracked-config.jsonc" >> "$GITHUB_ENV"
         fi

@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       model:
-        description: Optional OpenCode model (for example, vshn-us-ai/subscription.glm-5.2)
+        description: Optional OpenCode model (for example, vshn-llm-router/opencode/glm-5.3-flash)
         required: false
         type: string
       timeout_minutes:
@@ -23,12 +23,13 @@ on:
         default: auto
         options:
           - auto
-          - vshn-us-ai/subscription.qwen3.8-flash
-          - vshn-us-ai/subscription.qwen3.8-max
-          - vshn-us-ai/subscription.glm-5.2
-          - vshn-us-ai/subscription.glm-5.3-flash
-          - vshn-us-ai/subscription.kimi-k3
-          - vshn-us-ai/subscription.deepseek-v4-pro
+          - vshn-llm-router/opencode/glm-5.3-flash
+          - vshn-llm-router/opencode/qwen3.8-flash
+          - vshn-llm-router/opencode/qwen3.8-max
+          - vshn-llm-router/opencode/kimi-k3
+          - vshn-llm-router/opencode/longcat-2.0
+          - vshn-llm-router/opencode/beam-free
+          - vshn-us-ai/byusage.moonshot/kimi-k3
           - opencode/big-pickle
           - opencode/longcat-2.5-preview-free
           - opencode/mimo-v2.6-flash-free
@@ -41,7 +42,7 @@ on:
         required: true
         type: string
       model:
-        description: Optional OpenCode model (for example, vshn-us-ai/subscription.glm-5.2)
+        description: Optional OpenCode model (for example, vshn-llm-router/opencode/glm-5.3-flash)
         required: false
         type: string
       timeout_minutes:
@@ -66,6 +67,8 @@ jobs:
       VSHN_US_BASE_URL: ${{ secrets.VSHN_US_BASE_URL }}
       VSHN_US_AI_BASE_URL: ${{ secrets.VSHN_US_AI_BASE_URL }}
       VSHN_US_AI_API_KEY: ${{ secrets.VSHN_US_AI_API_KEY }}
+      VSHN_LLM_ROUTER_BASE_URL: ${{ secrets.VSHN_LLM_ROUTER_BASE_URL }}
+      VSHN_LLM_ROUTER_API_KEY: ${{ secrets.VSHN_LLM_ROUTER_API_KEY }}
       BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
       BACLUC_AGENT_GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
       ISSUE_REPOSITORY: ${{ vars.ISSUE_REPOSITORY || github.repository }}
@@ -121,7 +124,8 @@ jobs:
           if [[ -z "$requested" && "${MODEL_CHOICE:-auto}" != auto ]]; then requested="$MODEL_CHOICE"; fi
 
           printf '::add-mask::%s\n' "$GITHUB_TOKEN"
-          printf '::add-mask::%s\n' "$VSHN_US_AI_API_KEY"
+          printf '::add-mask::%s\n' "${VSHN_US_AI_API_KEY:-}"
+          printf '::add-mask::%s\n' "${VSHN_LLM_ROUTER_API_KEY:-}"
 
           available_models_file="$RUNNER_TEMP/available-models.txt"
           printf '%s\n' "$AVAILABLE_MODELS" > "$available_models_file"
@@ -131,8 +135,9 @@ jobs:
 
           fallback_model=''
           # Allowed coordinator models, cheapest first: opencode/big-pickle is pinned first so it
-          # wins whenever available, then the discovered non-weak opencode/*-free ids, then the paid flash-tier models. vshn-us-ai/subscription.qwen3.8-max
-          # is deliberately absent: it burns disproportionate tokens, so it is never
+          # wins whenever available, then the discovered non-weak opencode/*-free ids, then the
+          # flash-tier models of the VSHN providers. The heavy Max-class models are deliberately
+          # absent from this list: they burn disproportionate tokens, so they are never
           # auto-selected. An explicit model / model_choice input is still honoured unchanged.
           # ponytail: token cost is not derivable from a model id; add a model here when it is
           # observed to burn; upgrade path is per-model cost metadata from the provider API.
@@ -144,9 +149,10 @@ jobs:
           cheap_models=(
             'opencode/big-pickle'
             "${free_models[@]}"
-            'vshn-us-ai/subscription.qwen3.8-flash'
-            'vshn-us-ai/subscription.glm-5.3-flash'
-            'vshn-us-ai/subscription.glm-5.2'
+            'vshn-llm-router/opencode/glm-5.3-flash'
+            'vshn-llm-router/opencode/qwen3.8-flash'
+            'vshn-llm-router/opencode/longcat-2.0'
+            'vshn-us-ai/subscription.opencode/glm-5.3-flash'
           )
           allowed_models_file="$RUNNER_TEMP/allowed-models.txt"
           : > "$allowed_models_file"
@@ -154,6 +160,9 @@ jobs:
             case "$candidate" in
               vshn-us-ai/*)
                 grep -Fxq "$candidate" "$available_models_file" && [[ -n "${VSHN_US_AI_API_KEY:-}" ]] || continue
+                ;;
+              vshn-llm-router/*)
+                grep -Fxq "$candidate" "$available_models_file" && [[ -n "${VSHN_LLM_ROUTER_API_KEY:-}" ]] || continue
                 ;;
               opencode/big-pickle)
                 grep -Fxq "$candidate" "$available_models_file" || continue
@@ -168,13 +177,11 @@ jobs:
           if [[ -z "$fallback_model" ]]; then
             # Last resort is capped at the paid flash tier and reuses the weak-free-model
             # exclusion, so neither a heavy nor a known-weak model can be selected here.
-            # Without VSHN_US_AI_API_KEY every paid model is dropped, matching the
-            # allow-list arm above, so a free but unusable model is never picked.
-            if [[ -n "${VSHN_US_AI_API_KEY:-}" ]]; then
-              last_resort_re="$weak_free_re"
-            else
-              last_resort_re="$weak_free_re|^(vshn-us-ai/)"
-            fi
+            # Without a provider API key every paid model of that provider is dropped,
+            # matching the allow-list arms above, so a free but unusable model is never picked.
+            last_resort_re="$weak_free_re"
+            [[ -n "${VSHN_US_AI_API_KEY:-}" ]] || last_resort_re="$last_resort_re|^(vshn-us-ai/)"
+            [[ -n "${VSHN_LLM_ROUTER_API_KEY:-}" ]] || last_resort_re="$last_resort_re|^(vshn-llm-router/)"
             fallback_model="$(grep -Ev "$last_resort_re" "$available_models_file" | grep -E -- '-flash$' | awk 'NF { print; exit }' || true)"
             if [[ -n "$fallback_model" ]]; then
               printf '::warning::no allowed coordinator model is available; using last-resort model: %s\n' "$fallback_model"
@@ -236,7 +243,7 @@ jobs:
           requested = sys.argv[1]
           available = [line.strip() for line in open(sys.argv[2]) if line.strip()]
           aliases = {
-              "qwen-3.8-flash": "vshn-us-ai/subscription.qwen3.8-flash",
+              "qwen-3.8-flash": "vshn-llm-router/opencode/qwen3.8-flash",
           }
 
           if requested in available:

@@ -16,6 +16,7 @@ FAILED_TTL_HOURS = 2
 GITHUB_ISSUE_BODY_LIMIT = 65536
 PROVIDERS = (
     ("vshn-us-ai", "VSHN_US_AI_API_KEY"),
+    ("vshn-llm-router", "VSHN_LLM_ROUTER_API_KEY"),
 )
 MAX_CONCURRENT = 5
 PROBE_TIMEOUT_SECONDS = 60
@@ -97,6 +98,17 @@ def parse_go_model_ids(models_json: str) -> list[str]:
         return sorted(set(m["id"] for m in data.get("data", []) if m.get("id")))
     except (json.JSONDecodeError, AttributeError, TypeError):
         return []
+
+
+# Router gateways mirror every upstream route as "<class>/<model>" next to the
+# runnable top-level id; the *-fallback classes are internal repoint aliases the
+# opencode CLI cannot address (static provider config only pins the canonical
+# classes), so probing them would fail every cycle for nothing.
+FALLBACK_RE = re.compile(r"^[^/]*-fallback/")
+
+
+def is_probeable_model(model_id: str) -> bool:
+    return not FALLBACK_RE.match(model_id)
 
 
 def load_provider_base_urls() -> dict[str, str]:
@@ -187,6 +199,8 @@ def build_candidates(
         if not env.get(key_env):
             continue
         for model in provider_models.get(provider, []):
+            if not is_probeable_model(model):
+                continue
             candidates.append(f"{provider}/{model}")
     candidates.extend(free_models)
     return candidates
@@ -274,6 +288,8 @@ def available_models(
             available.append(model)
     for provider, _ in PROVIDERS:
         for model in provider_models.get(provider, []):
+            if not is_probeable_model(model):
+                continue
             candidate = f"{provider}/{model}"
             if cache.get(candidate, {}).get("ok"):
                 available.append(candidate)
