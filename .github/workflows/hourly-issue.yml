@@ -34,6 +34,8 @@ jobs:
       ISSUE_REPOSITORY: ${{ vars.ISSUE_REPOSITORY || github.repository }}
       MODEL_AVAILABILITY_CACHE_ISSUE: ${{ vars.MODEL_AVAILABILITY_CACHE_ISSUE }}
       VSHN_US_AI_BASE_URL: ${{ vars.VSHN_US_AI_BASE_URL }}
+      VSHN_LLM_ROUTER_BASE_URL: ${{ secrets.VSHN_LLM_ROUTER_BASE_URL }}
+      VSHN_LLM_ROUTER_API_KEY: ${{ secrets.VSHN_LLM_ROUTER_API_KEY }}
 
     steps:
       - name: Check out repository
@@ -66,7 +68,8 @@ jobs:
           rm -f "$RUNNER_TEMP/opencode-fatal.json"
 
           printf '::add-mask::%s\n' "$GITHUB_TOKEN"
-          printf '::add-mask::%s\n' "$VSHN_US_AI_API_KEY"
+          printf '::add-mask::%s\n' "${VSHN_US_AI_API_KEY:-}"
+          printf '::add-mask::%s\n' "${VSHN_LLM_ROUTER_API_KEY:-}"
 
           gh label create agent-running -R "$ISSUE_REPOSITORY" \
             --color 0E8A16 --description 'Selected by the hourly issue runner' --force
@@ -103,12 +106,15 @@ jobs:
           # probe but fail as coordinator/selector in 10+ runs (e.g. 34029380869, 34042660858).
           mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models_file" | grep -Ev '/(ling-3\.0-flash-fin|mimo-v2\.5)-free$|/nemotron-' | awk '!seen[$0]++')
           for candidate in \
-            'vshn-us-ai/subscription.qwen3.8-flash' \
+            'vshn-llm-router/opencode/qwen3.8-flash' \
             'opencode/big-pickle' \
             "${free_models[@]}"; do
             case "$candidate" in
               vshn-us-ai/*)
                 grep -Fxq "$candidate" "$available_models_file" && [[ -n "$VSHN_US_AI_API_KEY" ]] || continue
+                ;;
+              vshn-llm-router/*)
+                grep -Fxq "$candidate" "$available_models_file" && [[ -n "${VSHN_LLM_ROUTER_API_KEY:-}" ]] || continue
                 ;;
               opencode/big-pickle)
                 grep -Fxq "$candidate" "$available_models_file" || continue
