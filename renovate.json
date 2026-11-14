@@ -13,6 +13,13 @@
       ],
       "datasourceTemplate": "npm",
       "depNameTemplate": "opencode-ai"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/.*/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)\\n[A-Z_]+=(?<currentValue>[0-9][\\w.-]*)"
+      ]
     }
   ]
 }
