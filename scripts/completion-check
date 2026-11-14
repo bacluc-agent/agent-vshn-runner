@@ -3,8 +3,37 @@ set -Eeuo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+# The .opencode tests import TypeScript directly and use node --test globs,
+# which need Node >= 22. Prefer a newer Node when the default is too old
+# (e.g. the Blacksmith runners ship Node 20).
+if ! node --version | grep -qE '^v(2[2-9]|[3-9][0-9])\.'; then
+  for node_dir in /opt/hostedtoolcache/node/*/x64/bin; do
+    if "$node_dir/node" --version | grep -qE '^v(2[2-9]|[3-9][0-9])\.'; then
+      export PATH="$node_dir:$PATH"
+      break
+    fi
+  done
+fi
+
+# renovate: datasource=docker depName=ghcr.io/bacluc/prettier-image/prettier-image
+PRETTIER_VERSION=3.9.4
+# renovate: datasource=docker depName=rhysd/actionlint
+ACTIONLINT_VERSION=1.7.12
+
 mount=(-v "$PWD:/workspace" -w /workspace)
 status=0
+
+# The prettier check must not cover nested git checkouts in the workspace
+# (e.g. cloned target repositories): they have their own formatting rules
+# and toolchain. git lists such checkouts as a single untracked "<dir>/"
+# entry, while regular untracked files of this repository stay checked.
+prettier_ignore=".prettierignore.completion-check"
+trap 'rm -f "$prettier_ignore"' EXIT
+cat .gitignore .prettierignore 2> /dev/null > "$prettier_ignore" || true
+printf '%s\n' "$prettier_ignore" >> "$prettier_ignore"
+while IFS= read -r entry; do
+  if [[ -e "${entry%/}/.git" ]]; then printf '%s\n' "${entry%/}/"; fi
+done < <(git ls-files --others --exclude-standard) >> "$prettier_ignore"
 
 check() {
   local name="$1"
@@ -18,11 +47,12 @@ check() {
   fi
 }
 
-check 'formatting (prettier --check .)' docker run --rm "${mount[@]}" ghcr.io/bacluc/prettier-image/prettier-image:3.9.4 --check .
-check 'actionlint (workflows + used actions)' docker run --rm "${mount[@]}" rhysd/actionlint:1.7.12 -color
+check 'formatting (prettier --check .)' docker run --rm "${mount[@]}" "ghcr.io/bacluc/prettier-image/prettier-image:${PRETTIER_VERSION}" --ignore-path "$prettier_ignore" --check .
+check 'actionlint (workflows + used actions)' docker run --rm "${mount[@]}" "rhysd/actionlint:${ACTIONLINT_VERSION}" -color
 if [[ ! -d .opencode/node_modules/@opencode-ai/plugin ]]; then
   check 'opencode node dependencies (npm install)' npm install --prefix .opencode
 fi
+check 'opencode plugin tests (node --test)' node --test ".opencode/plugin/*.test.mjs"
 check 'opencode tool tests (node --test)' node --test ".opencode/tool/*.test.mjs"
 check 'pytest (python tests)' uv run --group dev pytest -q .github/actions/model-availability scripts
 
