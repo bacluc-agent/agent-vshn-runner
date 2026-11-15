@@ -15,6 +15,24 @@ _HOSTILE_RE = re.compile(
     re.IGNORECASE,
 )
 _REQUIRED_HEADINGS = ("## Goal", "## How to implement")
+_MAX_VISIBLE_CHARS = 4000
+
+
+def _visible_chars(stripped: list[str]) -> int:
+    # ponytail: line-wise scan; parses neither attributes nor nesting — a line with
+    # "<details" starts skipping, its "</details>" (or any later one) ends it
+    visible = 0
+    in_fold = False
+    for line in stripped:
+        low = line.lower()
+        if not in_fold and "<details" in low:
+            in_fold = True
+        if in_fold:
+            if "</details>" in low:
+                in_fold = False
+            continue
+        visible += len(line)
+    return visible
 
 
 def _section_empty(stripped: list[str], heading_idx: int) -> bool:
@@ -64,6 +82,9 @@ def validate_refined_body(text: str) -> tuple[bool, str]:
         return False, "extra_sections"
     if _HOSTILE_RE.search(text):
         return False, "hostile_text"
+    visible = _visible_chars(stripped)
+    if visible > _MAX_VISIBLE_CHARS:
+        return False, "too_long"
     return True, "ok"
 
 

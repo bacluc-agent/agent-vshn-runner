@@ -43,6 +43,8 @@ Do NOT include any other heading or section, including `## Context`. Do not
 include a preamble, closing remarks, or markdown fences around the whole
 output. Output ONLY the two sections above.
 
+Keep at most 4000 visible characters before any `<details>` fold. Move evidence tables, run logs, and selector or command transcripts into one `<details><summary>Extra context</summary>…</details>` fold placed last in the implementation section; inside a fold use only `###` headings, because any other `## ` heading is rejected as `extra_sections`. The visible part keeps the goal, the numbered steps, and the files and commands needed to start coding.
+
 **Output is validated; rejected shapes.** `scripts/validate_refined_issue.py`
 checks your output before it is applied to the issue, and a rejected draft may
 be sent back to you once with the reason. A draft is rejected when it:
@@ -58,6 +60,7 @@ be sent back to you once with the reason. A draft is rejected when it:
   (`extra_sections`), or
 - contains prompt-injection markers (`BEGIN_PROMPT`, `END_PROMPT`,
   `SELECTED_ISSUE:`), an instruction to ignore previous instructions, or an
-  API-key-shaped secret (`hostile_text`).
+  API-key-shaped secret (`hostile_text`), or
+- exceeds 4000 visible characters before any `<details>` fold (`too_long`).
 
 When a rejected draft is sent back, output only the corrected body.

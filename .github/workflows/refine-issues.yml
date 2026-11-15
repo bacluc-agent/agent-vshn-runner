@@ -197,7 +197,7 @@ jobs:
 
               reason="${validation_out##*REFINE_VALIDATION: }"
               case "$reason" in
-                empty|missing_goal_heading|missing_impl_heading|empty_goal|empty_how_to_implement|wrong_order|extra_sections|fenced_output|hostile_text|ok) ;;
+                empty|missing_goal_heading|missing_impl_heading|empty_goal|empty_how_to_implement|wrong_order|extra_sections|fenced_output|hostile_text|too_long|ok) ;;
                 *) reason='validator_unavailable' ;;
               esac
               printf 'Issue #%s attempt %s rejected: %s\n' "$number" "$attempt" "$reason"
