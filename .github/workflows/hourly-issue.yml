@@ -54,7 +54,11 @@ jobs:
         if: always()
         shell: bash
         run: |
+          stop_token="$(openssl rand -hex 32)"
+          : "${stop_token:?stop-commands fence token generation failed}"
+          printf '::stop-commands::%s\n' "$stop_token"
           cat "$RUNNER_TEMP"/model-probes/*.log 2>/dev/null || true
+          printf '\n::%s::\n' "$stop_token"
 
       - name: Pick issue and dispatch
         id: pick
@@ -152,8 +156,12 @@ jobs:
 
           selection="$RUNNER_TEMP/selection.out"
           set +e
-          timeout 10m opencode run --agent issue-selector --model "$selection_model" --title "issue-selector" "$(< "$prompt")" 2> >(tee "${selection}.stderr" >&2) | tee "$selection"
+          stop_token="$(openssl rand -hex 32)"
+          : "${stop_token:?stop-commands fence token generation failed}"
+          printf '::stop-commands::%s\n' "$stop_token"
+          timeout 10m opencode run --agent issue-selector --model "$selection_model" --title "issue-selector" "$(< "$prompt")" | tee "$selection"
           selection_statuses=("${PIPESTATUS[@]}")
+          printf '\n::%s::\n' "$stop_token"
           selection_status=${selection_statuses[0]}
           selection_tee_status=${selection_statuses[1]}
           set -e
@@ -181,8 +189,12 @@ jobs:
             printf '%s\n' "$eof"
           } >> "$GITHUB_OUTPUT"
 
+          stop_token="$(openssl rand -hex 32)"
+          : "${stop_token:?stop-commands fence token generation failed}"
+          printf '::stop-commands::%s\n' "$stop_token"
           printf '%s\n' 'Implementation prompt:'
           cat "$selection"
+          printf '\n::%s::\n' "$stop_token"
 
       - name: Update cache on selection failure
         if: failure() && steps.pick.outputs.selection_model != '' && steps.model-availability.outputs.cache-issue != ''
