@@ -134,13 +134,41 @@ jobs:
           printf 'Choosing issue...\n'
           printf '\n\n\n\n\n\n'
 
+          enriched="$RUNNER_TEMP/candidates-enriched.txt"
+          feedback_json="$RUNNER_TEMP/candidate-feedback.json"
+          prs_dir="$RUNNER_TEMP/candidate-prs"
+          mkdir -p "$prs_dir"
+          extra_repos="$(jq -r '[.[].title // empty | scan("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+") | sub("#[0-9]+$"; "")] | unique | join(" ")' "$search_json" || true)"
+          export CANDIDATES="$candidates" SEARCH_JSON="$search_json" ENRICHED="$enriched" FEEDBACK_JSON="$feedback_json" PRS_DIR="$prs_dir" EXTRA_REPOS="$extra_repos"
+          timeout 90s bash -s <<'ENRICH' || true
+          set -u
+          gh api "repos/$ISSUE_REPOSITORY/issues/comments?per_page=100&sort=created&direction=desc" \
+            | jq 'if type == "array" then [.[] | select((.user.login // "") != "bacluc-agent") | select((.user.login // "") | test("\\[bot\\]$") | not) | select((.user.type // "") != "Bot") | select(.html_url | test("/issues/[0-9]+#issuecomment-")) | {issue: (.html_url | capture("/issues/(?<n>[0-9]+)#issuecomment-") | .n), created_at: .created_at}] | group_by(.issue) | map({key: .[0].issue, value: (map(.created_at) | max)}) | from_entries else {} end' > "$FEEDBACK_JSON" || true
+          i=0
+          for repo in bacluc-agent/agent-vshn-runner bacluc-agent/agent-vshn-todo bacluc/provision-machines $EXTRA_REPOS; do
+            i=$((i + 1))
+            gh pr list -R "$repo" --state all --limit 200 \
+              --json number,updatedAt,headRefName,state,title \
+              --jq "[.[] | . + {repo: \"$repo\"}]" > "$PRS_DIR/prs-$i.json" || true
+          done
+          python3 scripts/candidate_pr_status.py --annotate "$CANDIDATES" "$SEARCH_JSON" "$FEEDBACK_JSON" "$PRS_DIR"/prs-*.json > "$ENRICHED.tmp" && mv "$ENRICHED.tmp" "$ENRICHED" || true
+          ENRICH
+          if [[ ! -s "$enriched" ]]; then
+            {
+              printf '%s\n' 'PR/feedback data unavailable; showing bare candidate list.'
+              jq -r '.[] | "#\(.number) \(.title)"' "$search_json"
+            } > "$enriched"
+          fi
+
           default_tail="$(cat scripts/issue-selection-tail.txt)"
           tail_instruction="${SELECTION_PROMPT:-$default_tail}"
 
+          run_start_epoch="$(date +%s)"
           prompt="$RUNNER_TEMP/selection-prompt.txt"
           {
-            printf '%s\n' 'Open issue candidates in this repository (number: title, oldest first):'
-            jq -r '.[] | "\(.number): \(.title)"' "$search_json"
+            printf '%s\n' 'Open issue candidates (pre-computed metadata; oldest first):'
+            printf 'run-start-epoch: %s\n' "$run_start_epoch"
+            cat "$enriched"
             printf '%s\n' "$tail_instruction"
           } > "$prompt"
 
