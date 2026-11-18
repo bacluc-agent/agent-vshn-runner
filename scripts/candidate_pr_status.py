@@ -6,6 +6,11 @@ import sys
 
 BRANCH_RE = re.compile(r"^issue-(\d+)(?=$|[^A-Za-z0-9])")
 TITLE_RE = re.compile(r"#(\d+)(?=$|[^A-Za-z0-9])|issue[- ]#?(\d+)(?=$|[^A-Za-z0-9])")
+FENCE_RE = re.compile(r"</?candidate-data>", re.IGNORECASE)
+
+
+def sanitize_untrusted(value) -> str:
+    return FENCE_RE.sub(lambda match: match.group(0).replace("<", "[").replace(">", "]"), str(value))
 
 
 def issue_numbers_for_pr(pr: dict) -> set[int]:
@@ -41,12 +46,12 @@ def last_human_feedback(comments) -> str | None:
 def render_candidate(item, pr, feedback) -> str:
     number = item.get("number", "")
     created = (item.get("created_at") or "")[:10] or "unknown"
-    labels = ", ".join(label.get("name", "") for label in (item.get("labels") or []))
-    line = f"#{number} [created {created}] [{labels}] {item.get('title', '')}".rstrip()
+    labels = ", ".join(sanitize_untrusted(label.get("name", "")) for label in (item.get("labels") or []))
+    line = f"#{number} [created {created}] [{labels}] {sanitize_untrusted(item.get('title', ''))}".rstrip()
     if pr is None:
         line += " | PR: none"
     else:
-        line += f" | PR: {pr.get('repo', '')}#{pr['number']} {pr['state']} {pr.get('updatedAt', '')}"
+        line += f" | PR: {sanitize_untrusted(pr.get('repo', ''))}#{pr['number']} {pr['state']} {pr.get('updatedAt', '')}"
     line += f" | last-human-feedback: {feedback or 'none'}"
     return line
 
@@ -58,7 +63,7 @@ def recent_picks(prs, limit=15) -> list[str]:
             continue
         head = pr.get("headRefName") or ""
         if BRANCH_RE.match(head):
-            picks.append(head)
+            picks.append(sanitize_untrusted(head))
             if len(picks) >= limit:
                 break
     return picks
