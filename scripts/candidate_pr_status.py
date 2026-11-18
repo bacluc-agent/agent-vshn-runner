@@ -165,7 +165,15 @@ def main_annotate() -> int:
     return 0
 
 
+def main_fallback() -> int:
+    for item in load_json_list(sys.argv[2]):
+        print(f"#{item.get('number', '')} {sanitize_untrusted(item.get('title', ''))}")
+    return 0
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--annotate":
         sys.exit(main_annotate())
+    if len(sys.argv) > 1 and sys.argv[1] == "--fallback":
+        sys.exit(main_fallback())
     sys.exit(main())

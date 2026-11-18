@@ -156,7 +156,7 @@ jobs:
           if [[ ! -s "$enriched" ]]; then
             {
               printf '%s\n' 'PR/feedback data unavailable; showing bare candidate list.'
-              jq -r '.[] | "#\(.number) \(.title)"' "$search_json"
+              python3 scripts/candidate_pr_status.py --fallback "$search_json" || true
             } > "$enriched"
           fi
 
