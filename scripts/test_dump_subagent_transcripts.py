@@ -335,3 +335,21 @@ class TestRunOpencode:
         monkeypatch.setattr(dump_subagent_transcripts.subprocess, "run", fake_run)
         with pytest.raises(subprocess.CalledProcessError):
             dump_subagent_transcripts.run_opencode("session", "list")
+
+
+class TestRegression189:
+    def test_run_opencode_to_file_writes_non_empty_output(self, monkeypatch, tmp_path):
+        # Regression check for PR #17 / issue #189: run_opencode_to_file must write output
+        def fake_run(command, **kwargs):
+            out_path = kwargs.get("stdout")
+            if out_path is not None:
+                out_path.write('{"messages": [{"parts": [{"type":"text","text":"ok"}]}]}')
+            return SimpleNamespace(stdout="")
+
+        monkeypatch.setattr(dump_subagent_transcripts.subprocess, "run", fake_run)
+        path = str(tmp_path / "mock.json")
+        dump_subagent_transcripts.run_opencode_to_file("export", "ses_mock", path=path)
+        with open(path) as f:
+            content = f.read()
+        assert len(content) > 0
+        assert "messages" in content
