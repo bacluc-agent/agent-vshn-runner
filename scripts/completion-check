@@ -3,8 +3,48 @@ set -Eeuo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+# The .opencode tests import TypeScript directly, which needs Node's default
+# type stripping: >=22.18 and >=23.6 (not earlier 22.x/23.x releases). Prefer a
+# newer Node when the default is too old (e.g. GitHub-hosted ubuntu-latest
+# runners ship Node 20).
+node_supported() {
+  local node="${1:-node}" version major minor
+  version="$("$node" --version 2>/dev/null || true)"
+  [[ "$version" =~ ^v([0-9]+)\.([0-9]+) ]] || return 1
+  major="${BASH_REMATCH[1]}"
+  minor="${BASH_REMATCH[2]}"
+  ((major >= 24 || (major == 23 && minor >= 6) || (major == 22 && minor >= 18)))
+}
+if ! node_supported; then
+  while IFS= read -r node_dir; do
+    if [[ -x "$node_dir/node" ]] && node_supported "$node_dir/node"; then
+      export PATH="$node_dir:$PATH"
+      break
+    fi
+  done < <(printf '%s\n' /opt/hostedtoolcache/node/*/x64/bin | sort -Vr)
+fi
+if ! node_supported; then
+  printf 'ERROR: Node.js >=22.18 (>=23.6 on 23.x) is required for completion-check tests, but it is unavailable.\n' >&2
+  exit 1
+fi
+
+# renovate: datasource=docker depName=ghcr.io/bacluc/prettier-image/prettier-image
+PRETTIER_VERSION=3.9.4
+# renovate: datasource=docker depName=rhysd/actionlint
+ACTIONLINT_VERSION=1.7.12
+# renovate: datasource=docker depName=renovate/renovate
+RENOVATE_VERSION=44.240.0
+
 mount=(-v "$PWD:/workspace" -w /workspace)
 status=0
+
+# Nested git checkouts are expected only in ignored directories, which the
+# merged .gitignore skips. Merging .prettierignore as well also skips
+# gitignored generated files (e.g. .opencode/package-lock.json, uv.lock).
+prettier_ignore=".prettierignore.completion-check"
+trap 'rm -f "$prettier_ignore"' EXIT
+cat .gitignore .prettierignore 2> /dev/null > "$prettier_ignore" || true
+printf '%s\n' "$prettier_ignore" >> "$prettier_ignore"
 
 check() {
   local name="$1"
@@ -18,11 +58,23 @@ check() {
   fi
 }
 
-check 'formatting (prettier --check .)' docker run --rm "${mount[@]}" ghcr.io/bacluc/prettier-image/prettier-image:3.9.4 --check .
-check 'actionlint (workflows + used actions)' docker run --rm "${mount[@]}" rhysd/actionlint:1.7.12 -color
+renovate_check() {
+  local output
+  if ! output="$(docker run --rm "${mount[@]}" "renovate/renovate:${RENOVATE_VERSION}" --platform=local --dry-run=lookup --require-config=ignored --onboarding=false --include-paths=scripts/completion-check 2>&1)"; then
+    printf '%s\n' "$output"
+    return 1
+  fi
+  printf '%s\n' "$output"
+  grep -Fq '"regex": {"fileCount": 1, "depCount": 3}' <<< "$output"
+}
+
+check 'formatting (prettier --check .)' docker run --rm "${mount[@]}" "ghcr.io/bacluc/prettier-image/prettier-image:${PRETTIER_VERSION}" --ignore-path "$prettier_ignore" --check .
+check 'actionlint (workflows + used actions)' docker run --rm "${mount[@]}" "rhysd/actionlint:${ACTIONLINT_VERSION}" -color
+check 'renovate custom manager (regex extraction)' renovate_check
 if [[ ! -d .opencode/node_modules/@opencode-ai/plugin ]]; then
   check 'opencode node dependencies (npm install)' npm install --prefix .opencode
 fi
+check 'opencode plugin tests (node --test)' node --test ".opencode/plugin/*.test.mjs"
 check 'opencode tool tests (node --test)' node --test ".opencode/tool/*.test.mjs"
 check 'pytest (python tests)' uv run --group dev pytest -q .github/actions/model-availability scripts
 

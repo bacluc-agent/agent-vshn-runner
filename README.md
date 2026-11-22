@@ -125,7 +125,7 @@ Run the completion check before pushing:
 ./scripts/completion-check
 ```
 
-The script runs Prettier and actionlint inside Docker. The same check runs automatically on every push and pull request via `.github/workflows/ci.yml`.
+The script runs Prettier and actionlint inside Docker, verifies the Renovate regex manager extracts the pinned tool versions, installs the opencode Node dependencies and runs the plugin and tool Node tests, and runs the pytest suite. The same check runs automatically on every push and pull request via `.github/workflows/ci.yml`.
 
 ## Example walkthroughs
 
@@ -193,7 +193,7 @@ Code change in `.github/workflows/opencode.yml`:
 | **OpenCode**                 | The command-line tool that runs the agents.                                                                                            |
 | **Model**                    | An AI model the agents can call, for example a free model or a VSHN_US_AI model.                                                       |
 | **Model-availability cache** | A GitHub issue in `agent-vshn-todo` that remembers which models were recently reachable.                                               |
-| **Completion check**         | The local quality check script (`./scripts/completion-check`) that runs Prettier and actionlint.                                       |
+| **Completion check**         | The local quality check script (`./scripts/completion-check`) that runs Prettier, actionlint, Renovate, Node, and pytest checks.       |
 | **Issue repository**         | The repository that holds the backlog, configured with the `ISSUE_REPOSITORY` variable. Defaults to the current repository.            |
 
 ## Configuration
