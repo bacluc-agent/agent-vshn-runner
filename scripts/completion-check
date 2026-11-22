@@ -3,19 +3,28 @@ set -Eeuo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# The .opencode tests import TypeScript directly and use node --test globs,
-# which need Node >= 22. Prefer a newer Node when the default is too old
-# (e.g. GitHub-hosted ubuntu-latest runners ship Node 20).
-if ! node --version | grep -qE '^v(2[2-9]|[3-9][0-9])\.'; then
-  for node_dir in /opt/hostedtoolcache/node/*/x64/bin; do
-    if "$node_dir/node" --version | grep -qE '^v(2[2-9]|[3-9][0-9])\.'; then
+# The .opencode tests import TypeScript directly, which needs Node's default
+# type stripping: >=22.18 and >=23.6 (not earlier 22.x/23.x releases). Prefer a
+# newer Node when the default is too old (e.g. GitHub-hosted ubuntu-latest
+# runners ship Node 20).
+node_supported() {
+  local node="${1:-node}" version major minor
+  version="$("$node" --version 2>/dev/null || true)"
+  [[ "$version" =~ ^v([0-9]+)\.([0-9]+) ]] || return 1
+  major="${BASH_REMATCH[1]}"
+  minor="${BASH_REMATCH[2]}"
+  ((major >= 24 || (major == 23 && minor >= 6) || (major == 22 && minor >= 18)))
+}
+if ! node_supported; then
+  while IFS= read -r node_dir; do
+    if [[ -x "$node_dir/node" ]] && node_supported "$node_dir/node"; then
       export PATH="$node_dir:$PATH"
       break
     fi
-  done
+  done < <(printf '%s\n' /opt/hostedtoolcache/node/*/x64/bin | sort -Vr)
 fi
-if ! node --version | grep -qE '^v(2[2-9]|[3-9][0-9])\.'; then
-  printf 'ERROR: Node.js >=22 is required for completion-check tests, but it is unavailable.\n' >&2
+if ! node_supported; then
+  printf 'ERROR: Node.js >=22.18 (>=23.6 on 23.x) is required for completion-check tests, but it is unavailable.\n' >&2
   exit 1
 fi
 
